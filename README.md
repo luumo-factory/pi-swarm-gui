@@ -92,9 +92,15 @@ directory:
 
 ```bash
 mvn clean package
-mvn exec:java                 # uses default config path
-mvn exec:java -Dexec.args="/path/to/app-config.json"
+mvn compile exec:java         # compile + run (uses default config path)
+mvn compile exec:java -Dexec.args="/path/to/app-config.json"
 ```
+
+> Use `mvn compile exec:java` (or `mvn package` first): bare `mvn exec:java`
+> only runs whatever is already in `target/classes` and will **not** pick up
+> source changes. On connect the console logs `[swarm] connected to tcp://…`;
+> repeated `[swarm] connect … failed` lines mean the broker host/port in your
+> config is wrong or the broker is down.
 
 ## Test
 

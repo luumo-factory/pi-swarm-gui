@@ -321,16 +321,19 @@ public final class SwarmClient implements MqttCallbackExtended {
 
     @Override
     public void connectComplete(boolean reconnect, String serverUri) {
+        System.err.println("[swarm] " + (reconnect ? "reconnected" : "connected") + " to " + serverUri
+                + " (ns " + topics.namespace() + ")");
         try {
             subscribeAll();
         } catch (MqttException e) {
-            System.err.println("subscribe failed: " + e.getMessage());
+            System.err.println("[swarm] subscribe failed: " + e.getMessage());
         }
         listeners.forEach(SwarmListener::onConnected);
     }
 
     @Override
     public void connectionLost(Throwable cause) {
+        System.err.println("[swarm] connection lost: " + (cause == null ? "?" : cause.getMessage()));
         listeners.forEach(l -> l.onConnectionLost(cause));
     }
 
