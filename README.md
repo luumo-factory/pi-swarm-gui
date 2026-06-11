@@ -6,13 +6,17 @@ fleet. It connects to the swarm's MQTT broker to:
 - **List agents** with their model and live `busy` / `idle` / `offline` status.
 - Show the **shared message board** and broadcast posts to every agent.
 - **Open a tileable monitor window per agent** (MDI internal frames) showing a
-  pi-style activity feed, with the ability to send messages, stop the current
-  turn, toggle the model, and reset context.
+  pi-style activity feed (work events **and** control-plane replies), with the
+  ability to send messages, stop (abort) the current turn, toggle the model, and
+  reset context.
+- **Control / details dialog per agent** to switch model and enable/disable
+  extensions and tools over the dedicated control plane, and request a status
+  snapshot.
 - Switch between **light and dark** themes at runtime.
 
-See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the exact MQTT contract, including
-the two extension-side additions this GUI depends on (`stop` control action and
-`availableModels` in the registry payload).
+It speaks the two-plane protocol: a work/data plane (`in` / `interrupt` / `out`)
+and a dedicated control plane (`control/in` / `control/out`). See
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the exact MQTT contract.
 
 ## Requirements
 
@@ -63,10 +67,13 @@ reachable.
 ## Usage
 
 - **Agent list (left):** double-click an agent to open its monitor; right-click
-  for stop / toggle model / set model / reset.
+  for monitor / controls / stop / toggle model / set model / reset.
 - **Message board:** type in *Broadcast* and press Enter/Post; tick *urgent* to
   interrupt all agents.
-- **Agent monitor:** type in *Message* to queue work (or tick *urgent* to send
-  via the interrupt channel); use *Stop* / *Toggle model* in the toolbar.
+- **Agent monitor:** type in *Message* to queue work (or tick *urgent* to inject
+  a steering message); use *Stop* (abort) / *Toggle model* / *Controls…* in the
+  toolbar.
+- **Controls / details dialog:** pick a model, tick/untick extensions and tools
+  to enable/disable them, or *Request status*.
 - **Window menu:** Tile / Cascade the open monitors; show/hide the board.
 - **View ▸ Theme:** switch light/dark.

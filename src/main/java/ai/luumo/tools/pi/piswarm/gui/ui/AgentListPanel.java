@@ -105,6 +105,10 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         monitor.addActionListener(ev -> actions.openMonitor(agent));
         menu.add(monitor);
 
+        JMenuItem controls = new JMenuItem("Controls / details…");
+        controls.addActionListener(ev -> actions.openControls(agent));
+        menu.add(controls);
+
         JMenuItem stop = new JMenuItem("Stop current turn");
         stop.setEnabled(agent.getStatus().isBusy());
         stop.addActionListener(ev -> actions.stop(agent));

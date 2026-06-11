@@ -20,8 +20,12 @@ public interface SwarmListener {
     default void onAgentUpdated(Agent agent) {
     }
 
-    /** An event arrived on an agent's out stream. */
+    /** An event arrived on an agent's work {@code out} stream. */
     default void onAgentEvent(AgentEvent event) {
+    }
+
+    /** A reply arrived on an agent's {@code control/out} stream. */
+    default void onControlReply(AgentEvent event) {
     }
 
     /** A new post appeared on the shared board. */

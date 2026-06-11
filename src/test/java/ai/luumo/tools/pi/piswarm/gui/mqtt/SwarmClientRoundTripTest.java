@@ -2,6 +2,7 @@ package ai.luumo.tools.pi.piswarm.gui.mqtt;
 
 import ai.luumo.tools.pi.piswarm.gui.config.AppConfig;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
+import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentStatus;
 import ai.luumo.tools.pi.piswarm.gui.model.BoardPost;
 import org.eclipse.paho.client.mqttv3.MqttClient;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -64,7 +66,10 @@ class SwarmClientRoundTripTest {
                 "{\"id\":\"coder-1\",\"name\":\"Coder One\",\"status\":\"busy\","
                         + "\"model\":{\"provider\":\"anthropic\",\"id\":\"claude-sonnet-4-5\",\"name\":\"Sonnet\"},"
                         + "\"availableModels\":[{\"provider\":\"anthropic\",\"id\":\"claude-sonnet-4-5\",\"name\":\"Sonnet\"},"
-                        + "{\"provider\":\"openai\",\"id\":\"gpt-4o\",\"name\":\"GPT-4o\"}],\"ts\":1}",
+                        + "{\"provider\":\"openai\",\"id\":\"gpt-4o\",\"name\":\"GPT-4o\"}],"
+                        + "\"extensions\":[{\"id\":\"/x/plan-mode\",\"source\":\"extension\",\"tools\":[\"read_board\"],"
+                        + "\"commands\":[],\"active\":true}],"
+                        + "\"tools\":{\"active\":[\"read\",\"edit\"],\"available\":[\"read\",\"edit\",\"read_board\"]},\"ts\":1}",
                 true);
 
         assertTrue(latch.await(5, TimeUnit.SECONDS), "registry update not received");
@@ -74,9 +79,45 @@ class SwarmClientRoundTripTest {
         assertEquals(AgentStatus.BUSY, a.getStatus());
         assertEquals("Sonnet", a.modelLabel());
         assertEquals(2, a.getAvailableModels().size());
+        assertEquals(1, a.getExtensions().size());
+        assertEquals("plan-mode", a.getExtensions().get(0).shortName());
+        assertTrue(a.getExtensions().get(0).active());
+        assertEquals(List.of("read", "edit", "read_board"), a.getTools().available());
+        assertTrue(a.getTools().isActive("read"));
 
         client.disconnect();
         clearRetained("swarm-test/registry/coder-1");
+    }
+
+    @Test
+    void receivesControlReply() throws Exception {
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        SwarmClient client = new SwarmClient(config());
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<AgentEvent> received = new AtomicReference<>();
+        client.addListener(new SwarmListener() {
+            @Override
+            public void onControlReply(AgentEvent event) {
+                received.set(event);
+                latch.countDown();
+            }
+        });
+        client.connect();
+        TimeUnit.MILLISECONDS.sleep(300);
+
+        publish("swarm-test/agents/coder-1/control/out",
+                "{\"id\":\"coder-1\",\"type\":\"set_model_result\",\"ok\":true,"
+                        + "\"model\":{\"provider\":\"openai\",\"id\":\"gpt-4o\",\"name\":\"GPT-4o\"},\"ts\":9}",
+                false);
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "control reply not received");
+        AgentEvent e = received.get();
+        assertEquals("coder-1", e.agentId());
+        assertEquals("set_model_result", e.type());
+        assertTrue(e.raw().get("ok").asBoolean());
+
+        client.disconnect();
     }
 
     @Test

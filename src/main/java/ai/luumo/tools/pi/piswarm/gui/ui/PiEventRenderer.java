@@ -32,6 +32,13 @@ public final class PiEventRenderer {
             case "turn_end" -> renderTurnEnd(event);
             case "agent_end" -> renderAgentEnd(event);
             case "model_select", "set_model_result" -> renderModel(event);
+            case "abort" -> renderAbort(event);
+            case "status" -> note("● status: " + textOf(event.raw(), "status", "?")
+                    + "  ·  " + toolCount(event.raw()), theme.muted());
+            case "extensions" -> note("● " + extensionSummary(event.raw()), theme.muted());
+            case "extension_toggle" -> renderExtensionToggle(event);
+            case "tools" -> note("⚒ tools " + textOf(event.raw(), "action", "")
+                    + "  ·  " + toolCount(event.raw()), theme.tool());
             case "session_reset" -> note("● context reset", theme.warning());
             case "reloading" -> note("● reloading extensions", theme.warning());
             case "pong" -> note("● pong", theme.muted());
@@ -63,6 +70,40 @@ public final class PiEventRenderer {
             out.newline();
         }
         out.newline();
+    }
+
+    private void renderAbort(AgentEvent event) {
+        boolean ok = !event.raw().has("ok") || event.raw().get("ok").asBoolean();
+        boolean wasBusy = event.raw().hasNonNull("wasBusy") && event.raw().get("wasBusy").asBoolean();
+        String detail = ok ? (wasBusy ? "turn aborted" : "abort (was idle)") : "abort failed";
+        note("■ " + detail, ok ? theme.warning() : theme.error());
+    }
+
+    private void renderExtensionToggle(AgentEvent event) {
+        boolean ok = !event.raw().has("ok") || event.raw().get("ok").asBoolean();
+        if (!ok) {
+            note("✖ extension: " + textOf(event.raw(), "error", "failed"), theme.error());
+            return;
+        }
+        boolean enabled = event.raw().hasNonNull("enabled") && event.raw().get("enabled").asBoolean();
+        String matched = String.join(", ", stringArray(event.raw().get("matched")));
+        note("◆ extension " + (enabled ? "enabled" : "disabled") + ": " + matched, theme.accent());
+    }
+
+    private static String toolCount(JsonNode raw) {
+        JsonNode tools = raw.get("tools");
+        if (tools == null) {
+            return "";
+        }
+        int active = tools.get("active") != null ? tools.get("active").size() : 0;
+        int available = tools.get("available") != null ? tools.get("available").size() : 0;
+        return active + "/" + available + " tools active";
+    }
+
+    private static String extensionSummary(JsonNode raw) {
+        JsonNode exts = raw.get("extensions");
+        int n = exts != null && exts.isArray() ? exts.size() : 0;
+        return n + " extension(s)  ·  " + toolCount(raw);
     }
 
     private void renderModel(AgentEvent event) {

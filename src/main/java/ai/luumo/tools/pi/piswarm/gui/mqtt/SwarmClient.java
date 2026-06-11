@@ -6,6 +6,8 @@ import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentStatus;
 import ai.luumo.tools.pi.piswarm.gui.model.BoardPost;
+import ai.luumo.tools.pi.piswarm.gui.model.ExtensionInfo;
+import ai.luumo.tools.pi.piswarm.gui.model.ToolSummary;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -96,6 +98,7 @@ public final class SwarmClient implements MqttCallbackExtended {
     private void subscribeAll() throws MqttException {
         client.subscribe(topics.registryWildcard(), 1);
         client.subscribe(topics.agentOutWildcard(), 1);
+        client.subscribe(topics.agentControlOutWildcard(), 1);
         client.subscribe(topics.board(), 1);
     }
 
@@ -149,15 +152,14 @@ public final class SwarmClient implements MqttCallbackExtended {
     }
 
     /**
-     * Request the agent to hard-stop its current turn.
-     *
-     * <p>Protocol contract (to be implemented in the extension): a control
-     * message {@code {"action":"stop"}} aborts the in-flight turn.</p>
+     * Hard-cancel the agent's current turn via the control plane
+     * ({@code {"action":"abort"}}). Distinct from {@link #interruptAgent} which
+     * injects a steering message into the running turn.
      */
-    public void stopAgent(String agentId) {
+    public void abortAgent(String agentId) {
         ObjectNode node = mapper.createObjectNode();
-        node.put("action", "stop");
-        publish(topics.agentControl(agentId), node, false);
+        node.put("action", "abort");
+        publish(topics.agentControlIn(agentId), node, false);
     }
 
     /** Ask the agent to switch model. */
@@ -166,19 +168,42 @@ public final class SwarmClient implements MqttCallbackExtended {
         node.put("action", "set_model");
         node.put("provider", model.getProvider());
         node.put("modelId", model.getId());
-        publish(topics.agentControl(agentId), node, false);
+        publish(topics.agentControlIn(agentId), node, false);
     }
 
     public void resetAgent(String agentId) {
         ObjectNode node = mapper.createObjectNode();
         node.put("action", "reset");
-        publish(topics.agentControl(agentId), node, false);
+        publish(topics.agentControlIn(agentId), node, false);
     }
 
     public void pingAgent(String agentId) {
         ObjectNode node = mapper.createObjectNode();
         node.put("action", "ping");
-        publish(topics.agentControl(agentId), node, false);
+        publish(topics.agentControlIn(agentId), node, false);
+    }
+
+    /** Request a full status snapshot on the agent's {@code control/out}. */
+    public void requestStatus(String agentId) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("action", "status");
+        publish(topics.agentControlIn(agentId), node, false);
+    }
+
+    /** Enable or disable an extension (matched by path/basename/source substring). */
+    public void setExtensionEnabled(String agentId, String extension, boolean enabled) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("action", enabled ? "enable_extension" : "disable_extension");
+        node.put("extension", extension);
+        publish(topics.agentControlIn(agentId), node, false);
+    }
+
+    /** Enable or disable specific tools by name. */
+    public void setToolsEnabled(String agentId, List<String> tools, boolean enabled) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("action", enabled ? "enable_tools" : "disable_tools");
+        node.set("tools", mapper.valueToTree(tools));
+        publish(topics.agentControlIn(agentId), node, false);
     }
 
     // ------------------------------------------------------------------
@@ -207,6 +232,11 @@ public final class SwarmClient implements MqttCallbackExtended {
         String registryId = topics.agentIdFromRegistry(topic);
         if (registryId != null) {
             handleRegistry(registryId, payload);
+            return;
+        }
+        String controlId = topics.agentIdFromControlOut(topic);
+        if (controlId != null) {
+            handleControlOut(controlId, payload);
             return;
         }
         String outId = topics.agentIdFromOut(topic);
@@ -239,6 +269,8 @@ public final class SwarmClient implements MqttCallbackExtended {
             agent.setStatus(AgentStatus.from(text(n, "status", null)));
             agent.setModel(parseModel(n.get("model")));
             agent.setAvailableModels(parseModels(n.get("availableModels")));
+            agent.setExtensions(parseExtensions(n.get("extensions")));
+            agent.setTools(parseTools(n.get("tools")));
             if (n.hasNonNull("pid")) {
                 agent.setPid(n.get("pid").asInt());
             }
@@ -262,6 +294,18 @@ public final class SwarmClient implements MqttCallbackExtended {
             listeners.forEach(l -> l.onAgentEvent(event));
         } catch (Exception e) {
             System.err.println("bad out payload for " + id + ": " + e.getMessage());
+        }
+    }
+
+    private void handleControlOut(String id, String payload) {
+        try {
+            JsonNode n = mapper.readTree(payload);
+            String type = text(n, "type", "reply");
+            long ts = n.hasNonNull("ts") ? n.get("ts").asLong() : System.currentTimeMillis();
+            AgentEvent event = new AgentEvent(id, type, ts, n);
+            listeners.forEach(l -> l.onControlReply(event));
+        } catch (Exception e) {
+            System.err.println("bad control/out payload for " + id + ": " + e.getMessage());
         }
     }
 
@@ -301,6 +345,42 @@ public final class SwarmClient implements MqttCallbackExtended {
                 ModelRef ref = parseModel(item);
                 if (ref != null) {
                     out.add(ref);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static List<ExtensionInfo> parseExtensions(JsonNode node) {
+        List<ExtensionInfo> out = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            for (JsonNode item : node) {
+                out.add(new ExtensionInfo(
+                        text(item, "id", "unknown"),
+                        text(item, "source", "extension"),
+                        text(item, "scope", null),
+                        text(item, "origin", null),
+                        parseStringArray(item.get("tools")),
+                        parseStringArray(item.get("commands")),
+                        item.hasNonNull("active") && item.get("active").asBoolean()));
+            }
+        }
+        return out;
+    }
+
+    private static ToolSummary parseTools(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return ToolSummary.empty();
+        }
+        return new ToolSummary(parseStringArray(node.get("active")), parseStringArray(node.get("available")));
+    }
+
+    private static List<String> parseStringArray(JsonNode node) {
+        List<String> out = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            for (JsonNode item : node) {
+                if (item != null && !item.isNull()) {
+                    out.add(item.asText());
                 }
             }
         }

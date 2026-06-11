@@ -15,6 +15,8 @@ public final class Agent {
     private AgentStatus status = AgentStatus.UNKNOWN;
     private ModelRef model;
     private List<ModelRef> availableModels = new ArrayList<>();
+    private List<ExtensionInfo> extensions = new ArrayList<>();
+    private ToolSummary tools = ToolSummary.empty();
     private Integer pid;
     private String cwd;
     private long startedAt;
@@ -58,6 +60,22 @@ public final class Agent {
 
     public void setAvailableModels(List<ModelRef> availableModels) {
         this.availableModels = availableModels == null ? new ArrayList<>() : availableModels;
+    }
+
+    public List<ExtensionInfo> getExtensions() {
+        return extensions;
+    }
+
+    public void setExtensions(List<ExtensionInfo> extensions) {
+        this.extensions = extensions == null ? new ArrayList<>() : extensions;
+    }
+
+    public ToolSummary getTools() {
+        return tools;
+    }
+
+    public void setTools(ToolSummary tools) {
+        this.tools = tools == null ? ToolSummary.empty() : tools;
     }
 
     public Integer getPid() {

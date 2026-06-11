@@ -43,12 +43,32 @@ public final class Topics {
         return ns + "/agents/" + id + "/interrupt";
     }
 
-    /** Control channel for an agent (set_model, stop, reset, reload, ping). */
-    public String agentControl(String id) {
-        return ns + "/agents/" + id + "/control";
+    /** Control-plane command channel (set_model, abort, reset, reload, ping, ...). */
+    public String agentControlIn(String id) {
+        return ns + "/agents/" + id + "/control/in";
     }
 
-    /** Outbound event stream for all agents. */
+    /** Control-plane reply channel (acks, results, model/extension/tool state). */
+    public String agentControlOut(String id) {
+        return ns + "/agents/" + id + "/control/out";
+    }
+
+    public String agentControlOutWildcard() {
+        return ns + "/agents/+/control/out";
+    }
+
+    /** Extract the agent id from a control/out topic, or null if it doesn't match. */
+    public String agentIdFromControlOut(String topic) {
+        String prefix = ns + "/agents/";
+        String suffix = "/control/out";
+        if (topic.startsWith(prefix) && topic.endsWith(suffix)) {
+            String id = topic.substring(prefix.length(), topic.length() - suffix.length());
+            return id.contains("/") ? null : id;
+        }
+        return null;
+    }
+
+    /** Outbound work-event stream for all agents. */
     public String agentOutWildcard() {
         return ns + "/agents/+/out";
     }
@@ -57,12 +77,16 @@ public final class Topics {
         return ns + "/agents/" + id + "/out";
     }
 
-    /** Extract the agent id from an out topic, or null if it doesn't match. */
+    /**
+     * Extract the agent id from a work {@code out} topic, or null if it doesn't
+     * match. Multi-level ids are rejected so {@code .../control/out} never matches.
+     */
     public String agentIdFromOut(String topic) {
         String prefix = ns + "/agents/";
         String suffix = "/out";
         if (topic.startsWith(prefix) && topic.endsWith(suffix)) {
-            return topic.substring(prefix.length(), topic.length() - suffix.length());
+            String id = topic.substring(prefix.length(), topic.length() - suffix.length());
+            return id.contains("/") ? null : id;
         }
         return null;
     }

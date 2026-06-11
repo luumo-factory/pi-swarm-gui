@@ -14,9 +14,19 @@ class TopicsTest {
         assertEquals("swarm/registry/coder-1", topics.registry("coder-1"));
         assertEquals("swarm/agents/coder-1/in", topics.agentIn("coder-1"));
         assertEquals("swarm/agents/coder-1/interrupt", topics.agentInterrupt("coder-1"));
-        assertEquals("swarm/agents/coder-1/control", topics.agentControl("coder-1"));
+        assertEquals("swarm/agents/coder-1/control/in", topics.agentControlIn("coder-1"));
+        assertEquals("swarm/agents/coder-1/control/out", topics.agentControlOut("coder-1"));
         assertEquals("swarm/agents/coder-1/out", topics.agentOut("coder-1"));
         assertEquals("swarm/board", topics.board());
+    }
+
+    @Test
+    void distinguishesWorkOutFromControlOut() {
+        assertEquals("reviewer", topics.agentIdFromOut("swarm/agents/reviewer/out"));
+        // control/out must NOT be misread as a work-out topic
+        assertNull(topics.agentIdFromOut("swarm/agents/reviewer/control/out"));
+        assertEquals("reviewer", topics.agentIdFromControlOut("swarm/agents/reviewer/control/out"));
+        assertNull(topics.agentIdFromControlOut("swarm/agents/reviewer/out"));
     }
 
     @Test

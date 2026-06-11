@@ -1,8 +1,10 @@
 # MQTT protocol contract
 
 This GUI is a read/write client of the [`pi-mqtt-swarm`](https://github.com/luumo-factory/pi-mqtt-swarm)
-extension. It speaks the topic map documented in that project, plus two
-**additions** the GUI depends on that must be implemented on the extension side.
+extension. There are two planes:
+
+- **work / data plane** — `in` / `interrupt` / `out`
+- **control plane** — a dedicated `control/in` / `control/out` pair
 
 `NS` = namespace (config `mqtt.namespace`, default `swarm`).
 `ID` = slugified agent id.
@@ -11,16 +13,30 @@ extension. It speaks the topic map documented in that project, plus two
 
 | Topic | Retained | Payload | Used for |
 |-------|----------|---------|----------|
-| `NS/registry/ID` | ✅ + LWT | `{ id, name, status, model, availableModels?, pid, cwd, startedAt, ts }` | Agent list, busy/idle, current + available models |
-| `NS/agents/ID/out` | – | `{ type, ts, ... }` event stream | Per-agent monitor feed |
+| `NS/registry/ID` | ✅ + LWT | `{ id, name, status, model, availableModels, extensions, tools, pid, cwd, startedAt, ts }` | Agent list, busy/idle, current + available models, extension/tool state |
+| `NS/agents/ID/out` | – | work events `{ type, ts, ... }` | Per-agent monitor feed |
+| `NS/agents/ID/control/out` | – | control replies `{ id, type, ts, ... }` | Merged into the monitor feed; drives the controls dialog |
 | `NS/board` | – | `{ seq, from:{id,name}, text, urgent, ts }` | Shared board |
 
 `status` ∈ `online | busy | idle | offline`.
 
-`out` event `type`s rendered: `agent_start`, `turn_end` (`{ tools:[] }`),
-`agent_end` (`{ text }`), `model_select` / `set_model_result` (`{ model, ok }`),
-`session_reset`, `reloading`, `pong`, `ack` (`{ action }`), `error` (`{ error }`).
-Unknown types render as a muted note, so new event types are safe to add.
+`model` is `{ provider, id, name }`. `availableModels` is `[{ provider, id, name }]`
+(models the agent can actually switch to). `extensions` is
+`[{ id, source, scope, origin, tools[], commands[], active }]`. `tools` is
+`{ active: string[], available: string[] }`.
+
+**Work `out` event types** rendered: `agent_start`, `turn_end` (`{ tools:[] }`),
+`agent_end` (`{ text }`), `session_reset`, `reloading`.
+
+**Control `out` reply types** rendered: `pong`, `status`, `set_model_result`
+(`{ ok, model, error }`), `model_select` (`{ model, source }`), `abort`
+(`{ ok, wasBusy }`), `extensions` / `extension_toggle` (`{ ok, enabled, matched }`),
+`tools` (`{ action, tools }`), `ack` (`{ action }`), `error` (`{ error }`).
+Unknown types render as a muted note, so new ones are safe to add.
+
+> **Topic disambiguation:** `NS/agents/+/out` (work) and `NS/agents/+/control/out`
+> are different MQTT levels and never collide; `Topics.agentIdFromOut` also
+> rejects multi-level ids so `control/out` is never misread as a work topic.
 
 ## Topics published (GUI → agent)
 
@@ -28,66 +44,44 @@ Unknown types render as a muted note, so new event types are safe to add.
 |-------|---------|---------|
 | `NS/board` | `{ seq, from:{id,name}, text, urgent, ts }` | Board "Post" box |
 | `NS/agents/ID/in` | `{ text }` | Monitor "Send" (normal) |
-| `NS/agents/ID/interrupt` | `{ text }` | Monitor "Send" with *urgent* |
-| `NS/agents/ID/control` | `{ action, ... }` | Buttons / context menu |
+| `NS/agents/ID/interrupt` | `{ text }` | Monitor "Send" with *urgent* (injects/steers) |
+| `NS/agents/ID/control/in` | `{ action, ... }` | Buttons / context menu / controls dialog |
 
-Control actions published:
+Control actions published by the GUI:
 
 ```jsonc
-{ "action": "stop" }                                   // NEW — see below
-{ "action": "set_model", "provider": "...", "modelId": "..." }
-{ "action": "reset" }
-{ "action": "ping" }
+{ "action": "abort" }                                           // Stop button — cancels the running turn
+{ "action": "set_model", "provider": "...", "modelId": "..." }  // Toggle model / Set model / dialog
+{ "action": "reset" }                                           // Reset context
+{ "action": "ping" }                                            // (programmatic)
+{ "action": "status" }                                          // controls dialog "Request status"
+{ "action": "enable_extension",  "extension": "<id|path|name>" }
+{ "action": "disable_extension", "extension": "<id|path|name>" }
+{ "action": "enable_tools",  "tools": ["..."] }
+{ "action": "disable_tools", "tools": ["..."] }
 ```
+
+### Two kinds of "interrupt"
+
+- `NS/agents/ID/interrupt` (work plane) — *injects* an urgent message into the
+  running turn (steering). Used by the monitor's **Send + urgent**.
+- `{ "action": "abort" }` on `control/in` — *cancels* the running turn entirely
+  (`ctx.abort()`). Used by the **Stop** button. (`interrupt` is an alias the
+  extension accepts for `abort`.)
 
 The board `from` identity comes from config `orchestrator.{id,name}` (default
-`gui` / `monitor`). The GUI maintains its own `seq` counter.
+`gui` / `monitor`); the GUI maintains its own `seq` counter.
 
----
+## Mapping to the UI
 
-## Required extension additions
+| UI surface | Reads | Writes |
+|------------|-------|--------|
+| Agent list (status dot, model) | `registry` | — |
+| Right-click menu | `registry` (available models) | `abort`, `set_model`, `reset` |
+| Message board | `board` | `board` |
+| Agent monitor feed | `out` + `control/out` | `in`, `interrupt`, `abort`, `set_model` |
+| Controls / details dialog | `registry` (model/extensions/tools) | `set_model`, `enable/disable_extension`, `enable/disable_tools`, `status` |
 
-The GUI is already coded against these; they need implementing in
-`pi-mqtt-swarm` for the corresponding buttons to function.
-
-### 1. `stop` control action — hard-cancel the current turn
-
-The existing `/interrupt` channel only *steers* a running turn (injects text the
-model sees). The GUI's **Stop** button instead publishes:
-
-```json
-{ "action": "stop" }
-```
-
-to `NS/agents/ID/control`, and expects the extension to abort the in-flight turn
-(equivalent to the user pressing the interrupt/escape key in the TUI). An
-acknowledgement on `NS/agents/ID/out` (e.g. `{ "type":"ack","action":"stop" }`)
-is recommended but not required.
-
-> If/when a richer per-agent control channel is added, only the topic/payload in
-> `SwarmClient.stopAgent(...)` needs to change.
-
-### 2. `availableModels` in the registry payload
-
-To populate the model picker and the **Toggle model** action, the retained
-`NS/registry/ID` message should include the list of models the agent can switch
-to:
-
-```jsonc
-{
-  "id": "coder-1",
-  "name": "Coder One",
-  "status": "idle",
-  "model":  { "provider": "anthropic", "id": "claude-sonnet-4-5", "name": "Sonnet 4.5" },
-  "availableModels": [
-    { "provider": "anthropic", "id": "claude-sonnet-4-5", "name": "Sonnet 4.5" },
-    { "provider": "openai",    "id": "gpt-4o",            "name": "GPT-4o" }
-  ],
-  "pid": 111, "cwd": "/work", "startedAt": 0, "ts": 0
-}
-```
-
-"Toggle model" cycles to the next entry in `availableModels` and publishes a
-`set_model` control message. Until the extension advertises `availableModels`,
-the GUI falls back to `fallbackModels` from its own config; if that is also
-empty, toggling shows an explanatory dialog instead of guessing.
+The model-switch, extension-toggle and tool-toggle results come back on
+`control/out` and the agent re-publishes its `registry`, so the agent list and
+the controls dialog refresh automatically.

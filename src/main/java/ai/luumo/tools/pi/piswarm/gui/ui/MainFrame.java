@@ -24,7 +24,9 @@ import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.beans.PropertyVetoException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Main application window: agent list on the left, a tiling desktop on the right
@@ -39,6 +41,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
 
     private final JDesktopPane desktop = new JDesktopPane();
     private final JLabel statusBar = new JLabel();
+    private final Map<String, AgentControlDialog> controlDialogs = new HashMap<>();
     private JInternalFrame boardFrame;
 
     public MainFrame(AppConfig config, SwarmModel model, SwarmClient client, ThemeManager theme) {
@@ -217,7 +220,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
 
     @Override
     public void stop(Agent agent) {
-        client.stopAgent(agent.getId());
+        client.abortAgent(agent.getId());
     }
 
     @Override
@@ -256,6 +259,34 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     @Override
     public void interrupt(Agent agent, String text) {
         client.interruptAgent(agent.getId(), text);
+    }
+
+    @Override
+    public void setExtensionEnabled(Agent agent, String extensionId, boolean enabled) {
+        client.setExtensionEnabled(agent.getId(), extensionId, enabled);
+    }
+
+    @Override
+    public void setToolsEnabled(Agent agent, java.util.List<String> tools, boolean enabled) {
+        client.setToolsEnabled(agent.getId(), tools, enabled);
+    }
+
+    @Override
+    public void requestStatus(Agent agent) {
+        client.requestStatus(agent.getId());
+    }
+
+    @Override
+    public void openControls(Agent agent) {
+        AgentControlDialog existing = controlDialogs.get(agent.getId());
+        if (existing != null && existing.isDisplayable()) {
+            existing.toFront();
+            existing.requestFocus();
+            return;
+        }
+        AgentControlDialog dialog = new AgentControlDialog(this, agent, model, this);
+        controlDialogs.put(agent.getId(), dialog);
+        dialog.setVisible(true);
     }
 
     @Override

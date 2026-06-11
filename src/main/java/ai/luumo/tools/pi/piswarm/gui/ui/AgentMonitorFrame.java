@@ -34,6 +34,7 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
     private final JLabel statusLabel = new JLabel();
     private final JButton stopButton = new JButton("Stop");
     private final JButton modelButton = new JButton("Toggle model");
+    private final JButton controlsButton = new JButton("Controls…");
     private final JTextField input = new JTextField();
     private final JCheckBox urgent = new JCheckBox("urgent");
 
@@ -80,11 +81,13 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
 
         stopButton.addActionListener(e -> withAgent(actions::stop));
         modelButton.addActionListener(e -> withAgent(actions::toggleModel));
+        controlsButton.addActionListener(e -> withAgent(actions::openControls));
 
         bar.add(statusLabel);
         bar.add(javax.swing.Box.createHorizontalGlue());
         bar.add(stopButton);
         bar.add(modelButton);
+        bar.add(controlsButton);
         return bar;
     }
 

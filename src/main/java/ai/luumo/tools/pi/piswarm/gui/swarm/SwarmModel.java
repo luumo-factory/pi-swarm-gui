@@ -103,6 +103,17 @@ public final class SwarmModel implements SwarmListener {
 
     @Override
     public void onAgentEvent(AgentEvent event) {
+        recordEvent(event);
+    }
+
+    @Override
+    public void onControlReply(AgentEvent event) {
+        // Control replies share the per-agent timeline so monitors show a single
+        // merged feed of work events and control acks/results.
+        recordEvent(event);
+    }
+
+    private void recordEvent(AgentEvent event) {
         edt(() -> {
             Deque<AgentEvent> q = events.computeIfAbsent(event.agentId(), k -> new ArrayDeque<>());
             q.addLast(event);
