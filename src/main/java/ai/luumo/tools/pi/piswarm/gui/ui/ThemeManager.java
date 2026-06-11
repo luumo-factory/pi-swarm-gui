@@ -47,6 +47,13 @@ public final class ThemeManager {
         // UIManager defaults, so re-apply after every theme change.
         UIManager.put("InternalFrame.dropShadowPainted", Boolean.FALSE);
         UIManager.put("InternalFrame.borderMargins", new Insets(0, 0, 0, 0));
+        // With the shadow gone the remaining 1px line border (borderLineWidth=1)
+        // is the only edge cue, but its default colour is a near-background shade
+        // and effectively invisible. Tint it a distinguishable purple so window
+        // edges (and the seam between snapped frames) read clearly.
+        boolean dark = newTheme == Theme.DARK;
+        UIManager.put("InternalFrame.activeBorderColor", dark ? new Color(0x9A6BFF) : new Color(0x7B3FD1));
+        UIManager.put("InternalFrame.inactiveBorderColor", dark ? new Color(0x5A4A7A) : new Color(0xB7A6DD));
 
         for (Window w : Window.getWindows()) {
             SwingUtilities.updateComponentTreeUI(w);
