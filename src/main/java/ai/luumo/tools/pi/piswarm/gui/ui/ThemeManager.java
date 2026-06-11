@@ -46,7 +46,11 @@ public final class ThemeManager {
         // are flush, so drop the shadow and zero the margin. FlatLaf.setup() resets
         // UIManager defaults, so re-apply after every theme change.
         UIManager.put("InternalFrame.dropShadowPainted", Boolean.FALSE);
-        UIManager.put("InternalFrame.borderMargins", new Insets(0, 0, 0, 0));
+        // Reserve exactly the 1px line width (not the default 6px shadow margin):
+        // 0 insets would let an opaque content pane paint over the border and hide
+        // it entirely (board/debug), while 1px keeps the line visible and still
+        // lets snapped frames sit flush (a 1px border each, no empty gap).
+        UIManager.put("InternalFrame.borderMargins", new Insets(1, 1, 1, 1));
         // With the shadow gone the remaining 1px line border (borderLineWidth=1)
         // is the only edge cue, but its default colour is a near-background shade
         // and effectively invisible. Tint it a distinguishable purple so window
