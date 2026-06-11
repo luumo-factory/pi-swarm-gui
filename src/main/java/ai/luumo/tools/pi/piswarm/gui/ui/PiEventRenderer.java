@@ -20,10 +20,12 @@ public final class PiEventRenderer {
 
     private final ThemeManager theme;
     private final PiOutputPane out;
+    private final MarkdownRenderer markdown;
 
     public PiEventRenderer(ThemeManager theme, PiOutputPane out) {
         this.theme = theme;
         this.out = out;
+        this.markdown = new MarkdownRenderer(theme, out);
     }
 
     public void render(AgentEvent event) {
@@ -66,8 +68,7 @@ public final class PiEventRenderer {
         out.append("assistant", theme.muted(), false, true);
         out.newline();
         if (text != null && !text.isBlank()) {
-            out.append(text.stripTrailing(), theme.assistant());
-            out.newline();
+            markdown.render(text.stripTrailing(), theme.assistant());
         }
         out.newline();
     }

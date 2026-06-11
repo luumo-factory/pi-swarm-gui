@@ -64,12 +64,26 @@ public final class PiOutputPane extends JScrollPane {
     }
 
     public void append(String text, Color color, boolean bold, boolean italic) {
+        appendStyled(text, color, null, bold, italic, false, false);
+    }
+
+    /**
+     * Append a fully styled segment. {@code fg}/{@code bg} may be {@code null}
+     * to inherit the pane defaults.
+     */
+    public void appendStyled(String text, Color fg, Color bg,
+                             boolean bold, boolean italic, boolean underline, boolean strike) {
         SimpleAttributeSet attrs = new SimpleAttributeSet();
-        if (color != null) {
-            StyleConstants.setForeground(attrs, color);
+        if (fg != null) {
+            StyleConstants.setForeground(attrs, fg);
+        }
+        if (bg != null) {
+            StyleConstants.setBackground(attrs, bg);
         }
         StyleConstants.setBold(attrs, bold);
         StyleConstants.setItalic(attrs, italic);
+        StyleConstants.setUnderline(attrs, underline);
+        StyleConstants.setStrikeThrough(attrs, strike);
         StyledDocument doc = pane.getStyledDocument();
         try {
             doc.insertString(doc.getLength(), text, attrs);

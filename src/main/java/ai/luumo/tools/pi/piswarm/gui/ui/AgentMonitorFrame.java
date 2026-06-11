@@ -33,7 +33,7 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
     private final PiEventRenderer renderer;
     private final JLabel statusLabel = new JLabel();
     private final JButton stopButton = new JButton("Stop");
-    private final JButton modelButton = new JButton("Toggle model");
+    private final JButton modelButton = new JButton("Model ▾");
     private final JButton controlsButton = new JButton("Controls…");
     private final JTextField input = new JTextField();
     private final JCheckBox urgent = new JCheckBox("urgent");
@@ -80,7 +80,7 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
         bar.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
 
         stopButton.addActionListener(e -> withAgent(actions::stop));
-        modelButton.addActionListener(e -> withAgent(actions::toggleModel));
+        modelButton.addActionListener(e -> withAgent(this::showModelMenu));
         controlsButton.addActionListener(e -> withAgent(actions::openControls));
 
         bar.add(statusLabel);
@@ -129,6 +129,29 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
         urgent.setSelected(false);
     }
 
+    /** Always present the selectable models as a popup list under the button. */
+    private void showModelMenu(Agent agent) {
+        java.util.List<ai.luumo.tools.pi.piswarm.gui.config.ModelRef> models =
+                actions.selectableModels(agent);
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        if (models.isEmpty()) {
+            javax.swing.JMenuItem none = new javax.swing.JMenuItem("(no models reported)");
+            none.setEnabled(false);
+            menu.add(none);
+        } else {
+            for (ai.luumo.tools.pi.piswarm.gui.config.ModelRef m : models) {
+                javax.swing.JMenuItem item = new javax.swing.JMenuItem(m.displayLabel());
+                if (m.equals(agent.getModel())) {
+                    item.setFont(item.getFont().deriveFont(Font.BOLD));
+                    item.setText("● " + m.displayLabel());
+                }
+                item.addActionListener(ev -> withAgent(a -> actions.setModel(a, m)));
+                menu.add(item);
+            }
+        }
+        menu.show(modelButton, 0, modelButton.getHeight());
+    }
+
     private void withAgent(java.util.function.Consumer<Agent> action) {
         Agent agent = model.agent(agentId);
         if (agent != null) {
@@ -152,7 +175,7 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
         statusLabel.setText(" " + agent.getStatus().label() + "  ·  " + agent.modelLabel() + "  ");
         statusLabel.setFont(statusLabel.getFont().deriveFont(Font.PLAIN));
         stopButton.setEnabled(agent.getStatus().isBusy());
-        modelButton.setEnabled(agent.getAvailableModels().size() > 1);
+        modelButton.setEnabled(true);
     }
 
     // ------------------------------------------------------------------

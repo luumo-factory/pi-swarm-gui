@@ -88,4 +88,28 @@ public final class ThemeManager {
         Color c = UIManager.getColor("Component.accentColor");
         return c != null ? c : userMessage();
     }
+
+    // ------------------------------------------------------------------
+    // Markdown styling
+    // ------------------------------------------------------------------
+
+    public Color heading() {
+        return accent();
+    }
+
+    public Color link() {
+        return userMessage();
+    }
+
+    public Color quote() {
+        return muted();
+    }
+
+    public Color codeForeground() {
+        return isDark() ? new Color(0xe6db74) : new Color(0xa6390f);
+    }
+
+    public Color codeBackground() {
+        return isDark() ? new Color(0x2b2f36) : new Color(0xeef0f3);
+    }
 }

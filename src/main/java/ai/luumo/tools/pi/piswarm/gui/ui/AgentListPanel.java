@@ -116,21 +116,20 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
 
         menu.addSeparator();
 
-        List<ModelRef> models = agent.getAvailableModels();
-        JMenuItem toggle = new JMenuItem("Toggle model (next)");
-        toggle.setEnabled(models.size() > 1);
-        toggle.addActionListener(ev -> actions.toggleModel(agent));
-        menu.add(toggle);
-
-        if (!models.isEmpty()) {
-            JPopupMenu sub = new JPopupMenu();
-            JMenuItem setModelLabel = new JMenuItem("Set model…");
-            setModelLabel.setEnabled(false);
-            menu.add(setModelLabel);
+        List<ModelRef> models = actions.selectableModels(agent);
+        JMenuItem setModelLabel = new JMenuItem("Set model…");
+        setModelLabel.setEnabled(false);
+        menu.add(setModelLabel);
+        if (models.isEmpty()) {
+            JMenuItem none = new JMenuItem("   (no models reported)");
+            none.setEnabled(false);
+            menu.add(none);
+        } else {
             for (ModelRef m : models) {
                 JMenuItem item = new JMenuItem("   " + m.displayLabel());
                 if (m.equals(agent.getModel())) {
                     item.setFont(item.getFont().deriveFont(Font.BOLD));
+                    item.setText("   ● " + m.displayLabel());
                 }
                 item.addActionListener(ev -> actions.setModel(agent, m));
                 menu.add(item);

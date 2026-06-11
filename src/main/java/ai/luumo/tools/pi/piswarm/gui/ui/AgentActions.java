@@ -14,8 +14,11 @@ public interface AgentActions {
     /** Hard-cancel the agent's current turn (control: {@code abort}). */
     void stop(Agent agent);
 
-    /** Cycle to the next available model for this agent. */
-    void toggleModel(Agent agent);
+    /**
+     * The models the user may switch this agent to: the agent's advertised
+     * available models, or the configured fallback list when none are reported.
+     */
+    List<ModelRef> selectableModels(Agent agent);
 
     /** Switch the agent to a specific model. */
     void setModel(Agent agent, ModelRef model);

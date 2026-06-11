@@ -16,7 +16,7 @@ import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
+import javax.swing.JDialog;
 import javax.swing.JPanel;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JSplitPane;
@@ -59,6 +59,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         agentList.setPreferredSize(new Dimension(260, 0));
 
         desktop.setBackground(javax.swing.UIManager.getColor("Panel.background"));
+        desktop.setDesktopManager(new SnappingDesktopManager());
         openBoard();
 
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, agentList, desktop);
@@ -224,21 +225,12 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     }
 
     @Override
-    public void toggleModel(Agent agent) {
+    public List<ModelRef> selectableModels(Agent agent) {
         List<ModelRef> models = agent.getAvailableModels();
-        if (models.isEmpty()) {
+        if (models == null || models.isEmpty()) {
             models = config.getFallbackModels();
         }
-        if (models.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "No available models advertised for " + agent.getName()
-                            + ".\nThe agent's registry message must include 'availableModels'.",
-                    "Toggle model", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        int current = models.indexOf(agent.getModel());
-        ModelRef next = models.get((current + 1) % models.size());
-        client.setModel(agent.getId(), next);
+        return models == null ? List.of() : models;
     }
 
     @Override
@@ -280,13 +272,27 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     public void openControls(Agent agent) {
         AgentControlDialog existing = controlDialogs.get(agent.getId());
         if (existing != null && existing.isDisplayable()) {
-            existing.toFront();
-            existing.requestFocus();
+            raise(existing);
             return;
         }
         AgentControlDialog dialog = new AgentControlDialog(this, agent, model, this);
         controlDialogs.put(agent.getId(), dialog);
         dialog.setVisible(true);
+        raise(dialog);
+    }
+
+    /** Reliably bring a (possibly already-open, non-modal) dialog to the front. */
+    private static void raise(JDialog dialog) {
+        if (!dialog.isVisible()) {
+            dialog.setVisible(true);
+        }
+        dialog.toFront();
+        dialog.requestFocus();
+        // Some window managers won't raise a non-modal dialog on toFront() alone;
+        // a brief always-on-top toggle forces it above the main window.
+        boolean wasOnTop = dialog.isAlwaysOnTop();
+        dialog.setAlwaysOnTop(true);
+        dialog.setAlwaysOnTop(wasOnTop);
     }
 
     @Override
