@@ -2,6 +2,8 @@ package ai.luumo.tools.pi.piswarm.gui.ui;
 
 import org.junit.jupiter.api.Test;
 
+import javax.swing.JDesktopPane;
+import javax.swing.JInternalFrame;
 import java.awt.Rectangle;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,6 +11,34 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class SnappingDesktopManagerTest {
 
     private static final int TOL = SnappingDesktopManager.REFLOW_TOLERANCE;
+
+    @Test
+    void draggingSnapsAdjacentFramesToOverlapBordersByOnePixel() {
+        JDesktopPane desktop = new JDesktopPane();
+        desktop.setSize(1000, 600);
+        SnappingDesktopManager mgr = new SnappingDesktopManager();
+        desktop.setDesktopManager(mgr);
+
+        JInternalFrame a = new JInternalFrame("a", true, true, true, true);
+        a.setBounds(0, 0, 200, 400);
+        a.setVisible(true);
+        desktop.add(a);
+        JInternalFrame b = new JInternalFrame("b", true, true, true, true);
+        b.setBounds(500, 0, 200, 400);
+        b.setVisible(true);
+        desktop.add(b);
+
+        // Drag b so its left edge is near a's right edge (200): it should snap to
+        // 199 (a.right - 1) so the two 1px borders overlap into one line.
+        mgr.dragFrame(b, 196, 0);
+        assertEquals(199, b.getX(), "left edge should overlap neighbour by the border width");
+        assertEquals(399, b.getX() + b.getWidth());
+
+        // Drag b's left edge near the desktop's left edge: snap flush to 0 (no
+        // overlap against the desktop).
+        mgr.dragFrame(b, 3, 0);
+        assertEquals(0, b.getX());
+    }
 
     @Test
     void tiledRowStretchesProportionally() {

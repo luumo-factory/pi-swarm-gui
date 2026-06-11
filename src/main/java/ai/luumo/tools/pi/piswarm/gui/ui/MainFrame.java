@@ -568,7 +568,11 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
             }
             int col = i % cols;
             int row = i / cols;
-            f.setBounds(col * w, row * h, w, h);
+            // Overlap neighbours by the border width so tiled frames share a
+            // single seam line rather than doubling their 1px borders.
+            int cw = w + (col < cols - 1 ? SnappingDesktopManager.BORDER_OVERLAP : 0);
+            int ch = h + (row < rows - 1 ? SnappingDesktopManager.BORDER_OVERLAP : 0);
+            f.setBounds(col * w, row * h, cw, ch);
         }
     }
 

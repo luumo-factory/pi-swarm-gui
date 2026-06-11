@@ -26,6 +26,14 @@ public final class SnappingDesktopManager extends DefaultDesktopManager {
      */
     public static final int REFLOW_TOLERANCE = 2;
 
+    /**
+     * Pixels two frames overlap when snapped edge-to-edge, equal to the frame
+     * border line width. Overlapping by exactly the border collapses the two
+     * adjacent 1px borders onto the same pixels so the seam reads as a single
+     * line instead of a doubled one. Snapping to a desktop edge does not overlap.
+     */
+    public static final int BORDER_OVERLAP = 1;
+
     private final int snapDistance;
 
     public SnappingDesktopManager() {
@@ -41,10 +49,8 @@ public final class SnappingDesktopManager extends DefaultDesktopManager {
         if (snapDistance > 0 && f instanceof JInternalFrame frame) {
             int w = frame.getWidth();
             int h = frame.getHeight();
-            int[] xLines = collectXLines(frame);
-            int[] yLines = collectYLines(frame);
-            newX = snap(newX, w, xLines);
-            newY = snap(newY, h, yLines);
+            newX = snapSpan(newX, w, nearTargets(frame, true), farTargets(frame, true));
+            newY = snapSpan(newY, h, nearTargets(frame, false), farTargets(frame, false));
         }
         super.dragFrame(f, newX, newY);
     }
@@ -54,12 +60,14 @@ public final class SnappingDesktopManager extends DefaultDesktopManager {
         if (snapDistance > 0 && f instanceof JInternalFrame frame) {
             int right = newX + newWidth;
             int bottom = newY + newHeight;
-            int[] xLines = collectXLines(frame);
-            int[] yLines = collectYLines(frame);
+            int[] nearX = nearTargets(frame, true);
+            int[] farX = farTargets(frame, true);
+            int[] nearY = nearTargets(frame, false);
+            int[] farY = farTargets(frame, false);
 
-            // Snap the moving (left/top) edges.
-            int snappedX = snapEdge(newX, xLines);
-            int snappedY = snapEdge(newY, yLines);
+            // Snap the moving (left/top) edges to where a near edge may sit.
+            int snappedX = snapEdge(newX, nearX);
+            int snappedY = snapEdge(newY, nearY);
             if (snappedX != newX) {
                 newWidth += newX - snappedX;
                 newX = snappedX;
@@ -69,9 +77,9 @@ public final class SnappingDesktopManager extends DefaultDesktopManager {
                 newY = snappedY;
             }
 
-            // Snap the far (right/bottom) edges, adjusting size only.
-            int snappedRight = snapEdge(right, xLines);
-            int snappedBottom = snapEdge(bottom, yLines);
+            // Snap the far (right/bottom) edges to where a far edge may sit.
+            int snappedRight = snapEdge(right, farX);
+            int snappedBottom = snapEdge(bottom, farY);
             if (snappedRight != right) {
                 newWidth = snappedRight - newX;
             }
@@ -87,74 +95,89 @@ public final class SnappingDesktopManager extends DefaultDesktopManager {
     // ------------------------------------------------------------------
 
     /**
-     * Snaps a frame whose near edge is at {@code pos} and whose extent is
-     * {@code size} so that either its near edge or its far edge aligns with a
-     * candidate line. Returns the adjusted near-edge position.
+     * Snaps a frame whose near edge is at {@code pos} (extent {@code size}) to the
+     * closest of its near-edge targets or far-edge targets; returns the adjusted
+     * near-edge position.
      */
-    private int snap(int pos, int size, int[] lines) {
+    private int snapSpan(int pos, int size, int[] nearTargets, int[] farTargets) {
         int best = pos;
         int bestDist = snapDistance + 1;
-        for (int line : lines) {
-            int dNear = Math.abs(line - pos);
-            if (dNear < bestDist) {
-                bestDist = dNear;
-                best = line;
-            }
-            int dFar = Math.abs(line - (pos + size));
-            if (dFar < bestDist) {
-                bestDist = dFar;
-                best = line - size;
-            }
-        }
-        return best;
-    }
-
-    /** Snaps a single edge position to the nearest candidate line. */
-    private int snapEdge(int pos, int[] lines) {
-        int best = pos;
-        int bestDist = snapDistance + 1;
-        for (int line : lines) {
-            int d = Math.abs(line - pos);
+        for (int t : nearTargets) {
+            int d = Math.abs(t - pos);
             if (d < bestDist) {
                 bestDist = d;
-                best = line;
+                best = t;
+            }
+        }
+        for (int t : farTargets) {
+            int d = Math.abs(t - (pos + size));
+            if (d < bestDist) {
+                bestDist = d;
+                best = t - size;
             }
         }
         return best;
     }
 
-    private int[] collectXLines(JInternalFrame frame) {
-        List<Integer> lines = new ArrayList<>();
-        JDesktopPane desktop = frame.getDesktopPane();
-        if (desktop != null) {
-            lines.add(0);
-            lines.add(desktop.getWidth());
-            for (JInternalFrame other : desktop.getAllFrames()) {
-                if (other == frame || !other.isVisible() || other.isIcon()) {
-                    continue;
-                }
-                lines.add(other.getX());
-                lines.add(other.getX() + other.getWidth());
+    /** Snaps a single edge position to the nearest candidate target. */
+    private int snapEdge(int pos, int[] targets) {
+        int best = pos;
+        int bestDist = snapDistance + 1;
+        for (int t : targets) {
+            int d = Math.abs(t - pos);
+            if (d < bestDist) {
+                bestDist = d;
+                best = t;
             }
         }
-        return toArray(lines);
+        return best;
     }
 
-    private int[] collectYLines(JInternalFrame frame) {
-        List<Integer> lines = new ArrayList<>();
+    /**
+     * Positions the moving frame's near (left/top) edge may snap to: the desktop's
+     * near edge (flush), another frame's matching near edge (aligned, borders
+     * already coincide), or another frame's far edge minus the border overlap
+     * (adjacency — the two 1px borders collapse onto one line).
+     */
+    private int[] nearTargets(JInternalFrame frame, boolean horizontal) {
+        List<Integer> targets = new ArrayList<>();
         JDesktopPane desktop = frame.getDesktopPane();
         if (desktop != null) {
-            lines.add(0);
-            lines.add(desktop.getHeight());
+            targets.add(0);
             for (JInternalFrame other : desktop.getAllFrames()) {
                 if (other == frame || !other.isVisible() || other.isIcon()) {
                     continue;
                 }
-                lines.add(other.getY());
-                lines.add(other.getY() + other.getHeight());
+                int near = horizontal ? other.getX() : other.getY();
+                int far = near + (horizontal ? other.getWidth() : other.getHeight());
+                targets.add(near);
+                targets.add(far - BORDER_OVERLAP);
             }
         }
-        return toArray(lines);
+        return toArray(targets);
+    }
+
+    /**
+     * Positions the moving frame's far (right/bottom) edge may snap to: the
+     * desktop's far edge (flush), another frame's matching far edge (aligned), or
+     * another frame's near edge plus the border overlap (adjacency).
+     */
+    private int[] farTargets(JInternalFrame frame, boolean horizontal) {
+        List<Integer> targets = new ArrayList<>();
+        JDesktopPane desktop = frame.getDesktopPane();
+        if (desktop != null) {
+            targets.add(horizontal ? desktop.getWidth() : desktop.getHeight());
+            for (JInternalFrame other : desktop.getAllFrames()) {
+                if (other == frame || !other.isVisible() || other.isIcon()) {
+                    continue;
+                }
+                int near = horizontal ? other.getX() : other.getY();
+                int far = near + (horizontal ? other.getWidth() : other.getHeight());
+                targets.add(far);
+                targets.add(near + BORDER_OVERLAP);
+            }
+        }
+        return toArray(targets);
     }
 
     // ------------------------------------------------------------------
