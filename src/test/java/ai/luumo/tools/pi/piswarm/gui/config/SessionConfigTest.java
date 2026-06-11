@@ -33,6 +33,7 @@ class SessionConfigTest {
         session.put(SessionConfig.MAIN, SessionConfig.WindowState.of(new Rectangle(10, 20, 800, 600), true, false));
         session.put(SessionConfig.monitor("coder-1"),
                 SessionConfig.WindowState.of(new Rectangle(40, 50, 560, 420), false, true));
+        session.setOpenWindows(java.util.List.of(SessionConfig.DEBUG, SessionConfig.monitor("coder-1")));
         ConfigLoader.saveSession(path, session);
 
         SessionConfig loaded = ConfigLoader.loadSession(path);
@@ -45,6 +46,11 @@ class SessionConfigTest {
         assertNotNull(mon);
         assertTrue(mon.isIcon());
         assertTrue(mon.hasSize());
+
+        // Open-window list round-trips and drives auto-reopen on next launch.
+        assertTrue(loaded.wasOpen(SessionConfig.DEBUG));
+        assertTrue(loaded.wasOpen(SessionConfig.monitor("coder-1")));
+        assertEquals(2, loaded.getOpenWindows().size());
     }
 
     @Test

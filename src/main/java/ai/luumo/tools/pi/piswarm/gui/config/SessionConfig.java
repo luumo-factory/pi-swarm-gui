@@ -3,7 +3,9 @@ package ai.luumo.tools.pi.piswarm.gui.config;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.awt.Rectangle;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,12 +35,31 @@ public final class SessionConfig {
 
     private Map<String, WindowState> windows = new LinkedHashMap<>();
 
+    /**
+     * Window ids that were open when the app last exited. Geometry lives in
+     * {@link #windows} (and is remembered even after a window closes, so it can
+     * be reused); this list records which of them should be re-opened on launch.
+     */
+    private List<String> openWindows = new ArrayList<>();
+
     public Map<String, WindowState> getWindows() {
         return windows;
     }
 
     public void setWindows(Map<String, WindowState> windows) {
         this.windows = (windows == null) ? new LinkedHashMap<>() : windows;
+    }
+
+    public List<String> getOpenWindows() {
+        return openWindows;
+    }
+
+    public void setOpenWindows(List<String> openWindows) {
+        this.openWindows = (openWindows == null) ? new ArrayList<>() : openWindows;
+    }
+
+    public boolean wasOpen(String id) {
+        return openWindows.contains(id);
     }
 
     public WindowState get(String id) {

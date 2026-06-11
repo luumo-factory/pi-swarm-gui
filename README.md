@@ -81,7 +81,10 @@ directory:
 - **`session-config.json`** — the UI session: the main window's size and
   location plus the geometry of every child window (board, MQTT debug,
   per-agent monitors and control dialogs), keyed by a stable id so each window
-  reopens where you last left it. The retained-message buffer is unaffected.
+  reopens where you last left it, plus the list of which windows were open. On
+  launch the debug window reopens immediately; per-agent monitor/controls
+  windows reopen automatically as soon as their agent is rediscovered over MQTT.
+  The retained-message buffer is unaffected.
 
 ## Build & run
 

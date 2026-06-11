@@ -60,6 +60,12 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     private final Path profilesPath;
     private Rectangle mainNormalBounds;
     private ProfileManagerDialog profileManager;
+    /**
+     * Window ids saved as open last session that we still need to re-open. Monitor
+     * and controls windows can only be restored once their agent is discovered
+     * over MQTT, so we defer those until the agent appears.
+     */
+    private final java.util.Set<String> pendingWindowRestores = new java.util.HashSet<>();
 
     private final JDesktopPane desktop = new JDesktopPane();
     private final SnappingDesktopManager desktopManager = new SnappingDesktopManager();
@@ -138,6 +144,43 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         model.addListener(this);
         updateStatusBar();
         restoreMainState();
+        restoreOpenWindows();
+    }
+
+    /**
+     * Re-open windows that were open last session. The debug window can open
+     * immediately; monitor/controls windows are queued until their agent is seen
+     * over MQTT (see {@link #agentUpdated}).
+     */
+    private void restoreOpenWindows() {
+        for (String id : session.getOpenWindows()) {
+            if (SessionConfig.DEBUG.equals(id)) {
+                openDebug();
+            } else if (id.startsWith("monitor:") || id.startsWith("controls:")) {
+                pendingWindowRestores.add(id);
+                // If the agent is already known (retained registry delivered fast),
+                // restore right away.
+                Agent agent = agentForWindowId(id);
+                if (agent != null) {
+                    restorePendingFor(agent);
+                }
+            }
+        }
+    }
+
+    private Agent agentForWindowId(String windowId) {
+        int colon = windowId.indexOf(':');
+        return colon < 0 ? null : model.agent(windowId.substring(colon + 1));
+    }
+
+    /** Open any queued monitor/controls windows for a now-known agent. */
+    private void restorePendingFor(Agent agent) {
+        if (pendingWindowRestores.remove(SessionConfig.monitor(agent.getId()))) {
+            openMonitor(agent);
+        }
+        if (pendingWindowRestores.remove(SessionConfig.controls(agent.getId()))) {
+            openControls(agent);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -275,8 +318,31 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
             }
         }
 
+        session.setOpenWindows(currentOpenWindowIds());
+
         // Persist the running theme so the saved app config reflects runtime choices.
         config.getUi().setTheme(theme.isDark() ? "dark" : "light");
+    }
+
+    /** Ids of the windows currently open, for restoring on next launch. */
+    private java.util.List<String> currentOpenWindowIds() {
+        java.util.List<String> open = new java.util.ArrayList<>();
+        for (JInternalFrame f : desktop.getAllFrames()) {
+            if (f.isClosed()) {
+                continue;
+            }
+            String id = windowId(f);
+            if (id != null) {
+                open.add(id);
+            }
+        }
+        for (Map.Entry<String, AgentControlDialog> e : controlDialogs.entrySet()) {
+            AgentControlDialog dialog = e.getValue();
+            if (dialog != null && dialog.isDisplayable()) {
+                open.add(SessionConfig.controls(e.getKey()));
+            }
+        }
+        return open;
     }
 
     private void persistConfigs() {
@@ -457,6 +523,9 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         });
         debugFrame.setVisible(true);
         desktop.add(debugFrame);
+        if (debugMenuItem != null) {
+            debugMenuItem.setSelected(true);
+        }
         try {
             debugFrame.setSelected(true);
         } catch (PropertyVetoException ignored) {
@@ -657,6 +726,15 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     @Override
     public void agentsChanged() {
         updateStatusBar();
+    }
+
+    @Override
+    public void agentUpdated(Agent agent) {
+        // An agent we saw open last session has just been (re)discovered over MQTT:
+        // re-open its monitor/controls window now that we know it exists.
+        if (!pendingWindowRestores.isEmpty()) {
+            restorePendingFor(agent);
+        }
     }
 
     @Override
