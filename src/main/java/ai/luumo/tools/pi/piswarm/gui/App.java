@@ -9,7 +9,6 @@ import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
 import ai.luumo.tools.pi.piswarm.gui.ui.MainFrame;
 import ai.luumo.tools.pi.piswarm.gui.ui.ThemeManager;
 
-import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import java.nio.file.Path;
 
@@ -50,18 +49,10 @@ public final class App {
                     configPath, sessionPath, profilesPath);
             frame.setVisible(true);
 
-            // Connect off the EDT so a slow/missing broker doesn't freeze the UI.
-            new Thread(() -> {
-                try {
-                    client.connect();
-                } catch (Exception e) {
-                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame,
-                            "Could not connect to MQTT broker at " + cfg.getMqtt().serverUri()
-                                    + "\n" + e.getMessage()
-                                    + "\n\nThe UI will keep retrying automatically.",
-                            "MQTT connection", JOptionPane.WARNING_MESSAGE));
-                }
-            }, "mqtt-connect").start();
+            // Connect off the EDT (so a slow/missing broker never freezes the UI),
+            // retrying until the broker is reachable. The status bar reflects the
+            // live connection state.
+            client.connectWithRetry();
         });
 
         Runtime.getRuntime().addShutdownHook(new Thread(client::disconnect, "mqtt-shutdown"));

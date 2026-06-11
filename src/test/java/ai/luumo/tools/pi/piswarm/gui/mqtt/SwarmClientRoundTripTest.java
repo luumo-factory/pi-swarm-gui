@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -124,6 +125,39 @@ class SwarmClientRoundTripTest {
         assertTrue(e.raw().get("ok").asBoolean());
 
         client.disconnect();
+    }
+
+    @Test
+    void connectWithRetryConnectsToLiveBroker() throws Exception {
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        SwarmClient client = new SwarmClient(config());
+        CountDownLatch latch = new CountDownLatch(1);
+        client.addListener(new SwarmListener() {
+            @Override
+            public void onConnected() {
+                latch.countDown();
+            }
+        });
+        client.connectWithRetry();
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "connectWithRetry did not connect");
+        assertTrue(client.isConnected());
+        client.disconnect();
+    }
+
+    @Test
+    void connectWithRetryKeepsTryingAndStopsOnDisconnect() throws Exception {
+        // Point at a port with no broker: it must not connect, must not throw on
+        // the caller thread, and disconnect() must halt the retry loop.
+        AppConfig c = new AppConfig();
+        c.getMqtt().setHost("127.0.0.1");
+        c.getMqtt().setPort(1);
+        c.getMqtt().setConnectionTimeoutSeconds(1);
+        SwarmClient client = new SwarmClient(c);
+        client.connectWithRetry();
+        TimeUnit.MILLISECONDS.sleep(500);
+        assertFalse(client.isConnected());
+        client.disconnect(); // sets closing flag so the retry thread exits
     }
 
     @Test

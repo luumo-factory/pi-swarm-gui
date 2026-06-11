@@ -42,6 +42,7 @@ public final class SwarmClient implements MqttCallbackExtended {
     private final AtomicLong boardSeq = new AtomicLong(0);
 
     private MqttClient client;
+    private volatile boolean closing;
 
     public SwarmClient(AppConfig config) {
         this.config = config;
@@ -84,7 +85,54 @@ public final class SwarmClient implements MqttCallbackExtended {
         client.connect(opts);
     }
 
+    /**
+     * Connect in the background, retrying with capped exponential backoff until
+     * it succeeds (or {@link #disconnect()} is called). Paho's automatic
+     * reconnect only covers drops <em>after</em> an initial success, so without
+     * this a broker that is briefly unavailable at startup would never connect.
+     */
+    public void connectWithRetry() {
+        closing = false;
+        Thread t = new Thread(() -> {
+            long delayMs = 1000;
+            while (!closing) {
+                try {
+                    connect();
+                    return; // connectComplete() handles subscriptions
+                } catch (Exception e) {
+                    System.err.println("MQTT connect to " + config.getMqtt().serverUri()
+                            + " failed: " + e.getMessage() + "; retrying in " + (delayMs / 1000) + "s");
+                    safeCloseClient();
+                    if (closing) {
+                        return;
+                    }
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    delayMs = Math.min(delayMs * 2, 15000);
+                }
+            }
+        }, "mqtt-connect");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void safeCloseClient() {
+        if (client != null) {
+            try {
+                client.close(true);
+            } catch (Exception ignored) {
+                // best effort
+            }
+            client = null;
+        }
+    }
+
     public void disconnect() {
+        closing = true;
         if (client == null) {
             return;
         }
