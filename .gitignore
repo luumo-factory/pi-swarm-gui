@@ -52,3 +52,6 @@ nbdist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local runtime config (use config.example.json as a template)
+/config.json

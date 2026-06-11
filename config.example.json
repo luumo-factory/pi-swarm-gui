@@ -1,0 +1,25 @@
+{
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "namespace": "swarm",
+    "username": null,
+    "password": null,
+    "tls": false,
+    "keepAliveSeconds": 30,
+    "connectionTimeoutSeconds": 10
+  },
+  "ui": {
+    "theme": "dark",
+    "eventBufferSize": 500,
+    "boardHistorySize": 500
+  },
+  "orchestrator": {
+    "id": "gui",
+    "name": "monitor"
+  },
+  "fallbackModels": [
+    { "provider": "anthropic", "id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5" },
+    { "provider": "openai", "id": "gpt-4o", "name": "GPT-4o" }
+  ]
+}
