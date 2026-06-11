@@ -3,6 +3,7 @@ package ai.luumo.tools.pi.piswarm.gui.swarm;
 import ai.luumo.tools.pi.piswarm.gui.config.AppConfig;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
+import ai.luumo.tools.pi.piswarm.gui.model.AgentGroup;
 import ai.luumo.tools.pi.piswarm.gui.model.BoardPost;
 import ai.luumo.tools.pi.piswarm.gui.model.ConsoleInfo;
 import ai.luumo.tools.pi.piswarm.gui.model.RawMessage;
@@ -33,7 +34,14 @@ public final class SwarmModel implements SwarmListener {
     private final Map<String, Agent> agents = new LinkedHashMap<>();
     private final Map<String, ConsoleInfo> consoles = new LinkedHashMap<>();
     private final Map<String, Deque<AgentEvent>> events = new LinkedHashMap<>();
-    private final Deque<BoardPost> board = new ArrayDeque<>();
+    // One scrollback per group board, keyed by group id; all eight are cached so
+    // any can be displayed (or persisted) immediately.
+    private final Map<String, Deque<BoardPost>> boards = new LinkedHashMap<>();
+    // The group each agent currently belongs to. Authoritative for the GUI: it is
+    // updated from a registry payload that actually carries a group, and set
+    // optimistically when the user picks a new group (the registry republish then
+    // confirms it). Agents we've never assigned default to red.
+    private final Map<String, AgentGroup> agentGroups = new LinkedHashMap<>();
     // Raw MQTT frames retained per topic for the debug view (insertion-ordered).
     private final Map<String, Deque<RawMessage>> rawByTopic = new LinkedHashMap<>();
     private final List<SwarmModelListener> listeners = new CopyOnWriteArrayList<>();
@@ -77,6 +85,30 @@ public final class SwarmModel implements SwarmListener {
         return agents.get(id);
     }
 
+    /** The group an agent currently belongs to (defaults to red); call on the EDT. */
+    public AgentGroup groupOf(String agentId) {
+        return agentGroups.getOrDefault(agentId, AgentGroup.DEFAULT);
+    }
+
+    /**
+     * Optimistically move an agent to a group (the actual control message is sent
+     * by the caller). Fires listeners so the icon/list colour updates immediately;
+     * the agent's registry republish later confirms it.
+     */
+    public void setAgentGroup(String agentId, AgentGroup group) {
+        edt(() -> {
+            agentGroups.put(agentId, group);
+            Agent a = agents.get(agentId);
+            if (a != null) {
+                a.setGroup(group);
+            }
+            listeners.forEach(l -> l.agentsChanged());
+            if (a != null) {
+                listeners.forEach(l -> l.agentUpdated(a));
+            }
+        });
+    }
+
     /** Snapshot of known consoles (spawn hosts) sorted by name; call on the EDT. */
     public List<ConsoleInfo> consolesSorted() {
         List<ConsoleInfo> list = new ArrayList<>(consoles.values());
@@ -90,9 +122,19 @@ public final class SwarmModel implements SwarmListener {
         return q == null ? List.of() : new ArrayList<>(q);
     }
 
-    /** Recent board posts (oldest first); call on the EDT. */
-    public List<BoardPost> boardPosts() {
-        return new ArrayList<>(board);
+    /** Recent posts on a specific group's board (oldest first); call on the EDT. */
+    public List<BoardPost> boardPosts(AgentGroup group) {
+        Deque<BoardPost> q = boards.get(group.id());
+        return q == null ? List.of() : new ArrayList<>(q);
+    }
+
+    /** Recent posts across every group board (oldest first per group); call on the EDT. */
+    public List<BoardPost> allBoardPosts() {
+        List<BoardPost> out = new ArrayList<>();
+        for (Deque<BoardPost> q : boards.values()) {
+            out.addAll(q);
+        }
+        return out;
     }
 
     /** Snapshot of every topic seen so far (insertion order); call on the EDT. */
@@ -129,6 +171,14 @@ public final class SwarmModel implements SwarmListener {
     @Override
     public void onAgentUpdated(Agent agent) {
         edt(() -> {
+            // Only let a registry payload that actually reported a group override the
+            // GUI's current assignment; otherwise carry the existing one forward so a
+            // group-less republish doesn't wipe an optimistic (or prior) selection.
+            if (agent.isGroupReported()) {
+                agentGroups.put(agent.getId(), agent.getGroup());
+            } else {
+                agent.setGroup(agentGroups.getOrDefault(agent.getId(), AgentGroup.DEFAULT));
+            }
             agents.put(agent.getId(), agent);
             listeners.forEach(l -> l.agentsChanged());
             listeners.forEach(l -> l.agentUpdated(agent));
@@ -138,6 +188,7 @@ public final class SwarmModel implements SwarmListener {
     @Override
     public void onAgentRemoved(String agentId) {
         edt(() -> {
+            agentGroups.remove(agentId);
             if (agents.remove(agentId) != null) {
                 listeners.forEach(l -> l.agentsChanged());
             }
@@ -178,6 +229,43 @@ public final class SwarmModel implements SwarmListener {
         recordEvent(event);
     }
 
+    /**
+     * Seed per-agent feeds restored from disk at startup. Call before any UI
+     * listeners are attached: it populates the history (respecting the configured
+     * per-agent cap) without firing events, so monitors replay it on open.
+     */
+    public void seedEvents(Map<String, List<AgentEvent>> byAgent) {
+        edt(() -> {
+            int cap = config.getUi().getEventBufferSize();
+            for (Map.Entry<String, List<AgentEvent>> e : byAgent.entrySet()) {
+                if (e.getValue() == null || e.getValue().isEmpty()) {
+                    continue;
+                }
+                Deque<AgentEvent> q = events.computeIfAbsent(e.getKey(), k -> new ArrayDeque<>());
+                for (AgentEvent ev : e.getValue()) {
+                    q.addLast(ev);
+                    while (q.size() > cap) {
+                        q.removeFirst();
+                    }
+                }
+            }
+        });
+    }
+
+    /** Seed the group boards from disk at startup (respects the per-board cap). */
+    public void seedBoard(List<BoardPost> posts) {
+        edt(() -> {
+            int cap = config.getUi().getBoardHistorySize();
+            for (BoardPost p : posts) {
+                Deque<BoardPost> q = boards.computeIfAbsent(p.groupOrDefault().id(), k -> new ArrayDeque<>());
+                q.addLast(p);
+                while (q.size() > cap) {
+                    q.removeFirst();
+                }
+            }
+        });
+    }
+
     private void recordEvent(AgentEvent event) {
         edt(() -> {
             Deque<AgentEvent> q = events.computeIfAbsent(event.agentId(), k -> new ArrayDeque<>());
@@ -203,13 +291,30 @@ public final class SwarmModel implements SwarmListener {
         });
     }
 
+    /**
+     * Clear the locally-cached history for one group's board and notify
+     * listeners so any open board windows wipe their view. This only affects
+     * this client's own cache/view (board posts are non-retained, so there is
+     * no shared broker state to clear); call on the EDT.
+     */
+    public void clearBoard(AgentGroup group) {
+        edt(() -> {
+            Deque<BoardPost> q = boards.get(group.id());
+            if (q != null) {
+                q.clear();
+            }
+            listeners.forEach(l -> l.boardCleared(group));
+        });
+    }
+
     @Override
     public void onBoardPost(BoardPost post) {
         edt(() -> {
-            board.addLast(post);
+            Deque<BoardPost> q = boards.computeIfAbsent(post.groupOrDefault().id(), k -> new ArrayDeque<>());
+            q.addLast(post);
             int cap = config.getUi().getBoardHistorySize();
-            while (board.size() > cap) {
-                board.removeFirst();
+            while (q.size() > cap) {
+                q.removeFirst();
             }
             listeners.forEach(l -> l.boardPost(post));
         });
@@ -238,6 +343,10 @@ public final class SwarmModel implements SwarmListener {
         }
 
         default void boardPost(BoardPost post) {
+        }
+
+        /** A group's board history was cleared locally. */
+        default void boardCleared(AgentGroup group) {
         }
 
         default void rawMessage(RawMessage message) {

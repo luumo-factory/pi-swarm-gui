@@ -17,6 +17,8 @@ fleet. It connects to the swarm's MQTT broker to:
   than one console is running.
 - **Rename** agents over the control plane (right-click an agent or use the
   monitor toolbar).
+- **Purge stale (offline) agents** by clearing their retained MQTT registry
+  topic with an empty `retain=true` payload; only offered for offline agents.
 - Mirror **user input typed directly into an agent's TUI** in its monitor feed.
 - Switch between **light and dark** themes at runtime.
 - **Debug window** (toggle in *View ▸ Debug (MQTT messages)*) that shows the raw
@@ -64,9 +66,11 @@ forward automatically, so existing broker settings are preserved. See
 Launch profiles are stored next to the app config in **`profiles-config.json`**.
 A profile bundles an optional **agent name** (used as the spawned agent's
 `--name`), **model** (e.g. `anthropic/claude-sonnet-4-5` or a fuzzy query like
-`sonnet`) and extra **extensions**. Edit them in **Swarm ▸ Manage profiles…**
-(or *Manage profiles…* in the launch dropdown). All fields are optional —
-launching with `<defaults>` spawns a plain agent.
+`sonnet`), a **working directory** (the directory the agent is spawned in —
+defaults to your home directory when left blank) and extra **extensions**. Edit
+them in **Swarm ▸ Manage profiles…** (or *Manage profiles…* in the launch
+dropdown). All fields are optional — launching with `<defaults>` spawns a plain
+agent in your home directory.
 
 Agents are spawned through a swarm **console** (`pi-mqtt-swarm`'s `console.ts`,
 one per host). The GUI discovers consoles from their retained registry and, when
@@ -114,19 +118,42 @@ reachable.
 
 ## Usage
 
-- **Agent list (left):** double-click an agent to open its monitor; right-click
-  for monitor / controls / stop / **rename** / toggle model / set model / reset /
-  **shut down (/quit)**.
-  Only agents we've received a real status update for are shown (stale/retained
-  topics are ignored, and a deregistered agent is dropped); offline agents are
-  listed last. The **＋ Launch agent ▾** button at the bottom spawns a new agent
-  from a chosen profile (or `<defaults>`), with *Manage profiles…* below a
-  separator.
-- **Message board:** type in *Broadcast* and press Enter/Post; tick *urgent* to
-  interrupt all agents.
-- **Agent monitor:** type in *Message* to queue work (or tick *urgent* to inject
-  a steering message); use *Stop* (abort) / *Toggle model* / *Controls…* in the
-  toolbar.
+- **Left panel:** split into three sections — **Named Agents**, **Auto Agents**
+  and **Message Boards**.
+- **Named Agents:** the manually-launched agents. The **＋ Launch agent ▾**
+  button sits at the **top** of this section and spawns a new agent from a chosen
+  profile (or `<defaults>`), with *Manage profiles…* below a separator.
+  Double-click an agent to open its monitor; right-click for monitor / controls /
+  stop / **rename** / toggle model / set model / reset / **shut down (/quit)** /
+  **purge stale agent**. Only agents we've received a real status update for are
+  shown (stale/retained topics are ignored, and a deregistered agent is dropped);
+  offline agents are listed last. **Purge stale agent** is only enabled for
+  offline agents and clears the agent's retained MQTT registry topic (an empty
+  `retain=true` payload) so a dead agent is removed for every connected client.
+- **Agent groups:** every agent belongs to one of eight colour-coded groups
+  (default **red**), shown as a chain icon on each agent row and in the monitor
+  window header. Click the header chain icon to pick a group; the agent's
+  extension re-binds to that group's board topic and the change is reflected
+  everywhere (row icon, header, registry).
+- **Auto Agents:** reserved for auto-spawned agents (empty for now).
+- **Message Boards:** the eight colour-coded group boards (Red, Orange, Yellow,
+  Green, Cyan, Blue, Purple, Pink), each with a chain icon in its group colour.
+  Double-click a board to open (or focus) it as its own window. Each group has
+  its own board topic — the default **red** group keeps the legacy `NS/board`
+  topic, the others use `NS/board/<group>` — and every board is cached in the
+  background so any can be displayed instantly.
+- **Message board window:** type in *Broadcast* and press Enter/Post to post to
+  that group's board; tick *urgent* to interrupt the group's agents.
+- **Agent monitor:** the header shows the group chain icon, a colour-coded status
+  dot next to busy/idle, the model, and the working directory path. Type in
+  *Message* to queue work (or tick *urgent* to inject a steering message); use
+  *Stop* (abort) / *Model* / *Rename…* / *Controls…* in the toolbar.
+- **Message input:** focusing an agent or board window puts the cursor straight
+  in its input box. **Enter** sends; **Shift+Enter** starts a new line. The box
+  grows up to three rows whenever the text spans multiple lines — from explicit
+  newlines or soft word-wrap — and shrinks back to one row as the text shortens.
+- **Window navigation:** **Ctrl+Arrow** moves selection to the open window
+  immediately in that direction (left/right/up/down by on-screen position).
 - **Controls / details dialog:** pick a model, tick/untick extensions and tools
   to enable/disable them, or *Request status*.
 - **Snapping & reflow:** dragging/resizing a monitor snaps its edges to the

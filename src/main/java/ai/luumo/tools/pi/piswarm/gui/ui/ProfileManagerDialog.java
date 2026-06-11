@@ -43,6 +43,7 @@ public final class ProfileManagerDialog extends JDialog {
     private final JTextField nameField = new JTextField();
     private final JTextField agentNameField = new JTextField();
     private final JTextField modelField = new JTextField();
+    private final JTextField workingDirField = new JTextField();
     private final JTextArea extensionsArea = new JTextArea(5, 20);
 
     private Profile current;
@@ -105,6 +106,7 @@ public final class ProfileManagerDialog extends JDialog {
         addRow(panel, c, "Profile name:", nameField);
         addRow(panel, c, "Agent name (optional):", agentNameField);
         addRow(panel, c, "Model (optional):", modelField);
+        addRow(panel, c, "Working directory (optional):", workingDirField);
 
         // Extensions header + multiline area.
         c.gridx = 0;
@@ -120,6 +122,8 @@ public final class ProfileManagerDialog extends JDialog {
 
         modelField.setToolTipText("e.g. anthropic/claude-sonnet-4-5  or a fuzzy query like  sonnet");
         agentNameField.setToolTipText("Used as the spawned agent's --name; leave blank for a default name");
+        workingDirField.setToolTipText("Directory the agent runs in; leave blank to use your home directory ("
+                + System.getProperty("user.home", "~") + ")");
         return panel;
     }
 
@@ -180,17 +184,20 @@ public final class ProfileManagerDialog extends JDialog {
             nameField.setEnabled(has);
             agentNameField.setEnabled(has);
             modelField.setEnabled(has);
+            workingDirField.setEnabled(has);
             extensionsArea.setEnabled(has);
             if (!has) {
                 nameField.setText("");
                 agentNameField.setText("");
                 modelField.setText("");
+                workingDirField.setText("");
                 extensionsArea.setText("");
                 return;
             }
             nameField.setText(current.getName());
             agentNameField.setText(current.getAgentName());
             modelField.setText(current.getModel());
+            workingDirField.setText(current.getWorkingDir());
             extensionsArea.setText(String.join("\n", current.getExtensions()));
         } finally {
             loading = false;
@@ -204,6 +211,7 @@ public final class ProfileManagerDialog extends JDialog {
         current.setName(nameField.getText().trim());
         current.setAgentName(agentNameField.getText().trim());
         current.setModel(modelField.getText().trim());
+        current.setWorkingDir(workingDirField.getText().trim());
         List<String> exts = new ArrayList<>();
         for (String line : extensionsArea.getText().split("\\R")) {
             String t = line.trim();

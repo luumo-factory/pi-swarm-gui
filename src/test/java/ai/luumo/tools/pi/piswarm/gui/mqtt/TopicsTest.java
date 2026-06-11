@@ -21,6 +21,27 @@ class TopicsTest {
     }
 
     @Test
+    void buildsPerGroupBoardTopics() {
+        // The default red group keeps the legacy NS/board topic.
+        assertEquals("swarm/board", topics.board("red"));
+        assertEquals("swarm/board", topics.board(null));
+        assertEquals("swarm/board", topics.board(" "));
+        // Every other group uses NS/board/<group>.
+        assertEquals("swarm/board/blue", topics.board("blue"));
+        assertEquals("swarm/board/purple", topics.board("PURPLE"));
+        assertEquals("swarm/board/+", topics.boardSubWildcard());
+    }
+
+    @Test
+    void resolvesGroupFromBoardTopic() {
+        assertEquals("red", topics.groupFromBoard("swarm/board"));
+        assertEquals("green", topics.groupFromBoard("swarm/board/green"));
+        assertNull(topics.groupFromBoard("swarm/board/green/extra"));
+        assertNull(topics.groupFromBoard("swarm/registry/coder-1"));
+        assertNull(topics.groupFromBoard("swarm/agents/coder-1/out"));
+    }
+
+    @Test
     void distinguishesWorkOutFromControlOut() {
         assertEquals("reviewer", topics.agentIdFromOut("swarm/agents/reviewer/out"));
         // control/out must NOT be misread as a work-out topic

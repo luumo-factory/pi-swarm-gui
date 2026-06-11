@@ -58,6 +58,10 @@ public final class AgentControlDialog extends JDialog implements SwarmModel.Swar
 
         setSize(420, 560);
         setLocationRelativeTo(owner);
+        // Closing via the window 'X' should fully dispose (drop the model
+        // listener and free the native peer), so the dialog isn't mistaken for
+        // "still open" when persisting the session on exit.
+        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
         model.addListener(this);
         rebuild(agent);

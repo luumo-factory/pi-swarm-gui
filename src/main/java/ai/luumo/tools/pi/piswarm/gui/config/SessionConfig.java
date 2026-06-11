@@ -22,8 +22,18 @@ public final class SessionConfig {
 
     /** Well-known window ids. */
     public static final String MAIN = "main";
+    /** The default ({@code red}) group's board window (legacy id). */
     public static final String BOARD = "board";
     public static final String DEBUG = "debug";
+
+    /**
+     * Window id for a group's board. The default {@code red} group keeps the
+     * legacy {@link #BOARD} id; every other group uses {@code board:<group>}.
+     */
+    public static String board(String groupId) {
+        return (groupId == null || groupId.isBlank() || "red".equalsIgnoreCase(groupId.trim()))
+                ? BOARD : "board:" + groupId.trim().toLowerCase();
+    }
 
     public static String monitor(String agentId) {
         return "monitor:" + agentId;

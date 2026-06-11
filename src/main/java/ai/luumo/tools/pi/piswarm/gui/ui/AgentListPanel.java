@@ -3,10 +3,11 @@ package ai.luumo.tools.pi.piswarm.gui.ui;
 import ai.luumo.tools.pi.piswarm.gui.config.ModelRef;
 import ai.luumo.tools.pi.piswarm.gui.config.Profile;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
-import ai.luumo.tools.pi.piswarm.gui.model.AgentStatus;
+import ai.luumo.tools.pi.piswarm.gui.model.AgentGroup;
 import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -23,14 +24,23 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
 
 /**
- * Left-hand panel listing all known agents with their model and busy/idle state.
- * Double-click opens a monitor; right-click exposes stop / toggle model / reset.
+ * Left-hand panel split into three sections:
+ * <ol>
+ *   <li><b>Named Agents</b> — manually-launched agents, with the launch button
+ *       at the top. Double-click opens a monitor; right-click exposes the agent
+ *       actions (stop / model / reset / rename / quit / purge).</li>
+ *   <li><b>Auto Agents</b> — reserved for auto-spawned agents (empty for now).</li>
+ *   <li><b>Message Boards</b> — the eight colour-coded group boards; double-click
+ *       opens (or focuses) that group's board window.</li>
+ * </ol>
  */
 public final class AgentListPanel extends JPanel implements SwarmModel.SwarmModelListener {
 
@@ -41,32 +51,154 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
     private final DefaultListModel<Agent> listModel = new DefaultListModel<>();
     private final JList<Agent> list = new JList<>(listModel);
 
+    private final DefaultListModel<Agent> autoListModel = new DefaultListModel<>();
+    private final JList<Agent> autoList = new JList<>(autoListModel);
+
+    private final DefaultListModel<AgentGroup> boardListModel = new DefaultListModel<>();
+    private final JList<AgentGroup> boardList = new JList<>(boardListModel);
+
     public AgentListPanel(SwarmModel model, ThemeManager theme, AgentActions actions) {
-        super(new BorderLayout());
+        super(new GridBagLayout());
         this.model = model;
         this.theme = theme;
         this.actions = actions;
 
-        JLabel header = new JLabel("Agents");
-        header.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-        header.setFont(header.getFont().deriveFont(Font.BOLD));
-        add(header, BorderLayout.NORTH);
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.fill = GridBagConstraints.BOTH;
+        c.weightx = 1.0;
 
-        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        list.setCellRenderer(new AgentCell());
-        list.setFixedCellHeight(46);
-        add(new JScrollPane(list), BorderLayout.CENTER);
-        add(buildLaunchBar(), BorderLayout.SOUTH);
+        c.gridy = 0;
+        c.weighty = 1.0;
+        add(buildNamedAgentsSection(), c);
 
-        installMouse();
+        c.gridy = 1;
+        c.weighty = 0.0;
+        add(buildAutoAgentsSection(), c);
+
+        c.gridy = 2;
+        c.weighty = 0.0;
+        add(buildMessageBoardsSection(), c);
+
+        installAgentMouse();
+        installBoardMouse();
 
         model.addListener(this);
         refresh();
     }
 
+    // ------------------------------------------------------------------
+    // Section builders
+    // ------------------------------------------------------------------
+
+    private static JLabel sectionHeader(String text) {
+        JLabel header = new JLabel(text);
+        header.setBorder(BorderFactory.createEmptyBorder(8, 10, 6, 10));
+        header.setFont(header.getFont().deriveFont(Font.BOLD));
+        return header;
+    }
+
+    private JComponent buildNamedAgentsSection() {
+        JPanel section = new JPanel(new BorderLayout());
+
+        // Header (with a purge-all trash button) + launch button stacked at the
+        // top of the section.
+        JPanel headerRow = new JPanel(new BorderLayout());
+        headerRow.add(sectionHeader("Named Agents"), BorderLayout.CENTER);
+        JPanel headerButtons = new JPanel(new BorderLayout());
+        headerButtons.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 8));
+        headerButtons.add(buildPurgeAllButton(), BorderLayout.CENTER);
+        headerRow.add(headerButtons, BorderLayout.EAST);
+
+        JPanel top = new JPanel(new BorderLayout());
+        top.add(headerRow, BorderLayout.NORTH);
+        top.add(buildLaunchBar(), BorderLayout.SOUTH);
+        section.add(top, BorderLayout.NORTH);
+
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setCellRenderer(new AgentCell());
+        list.setFixedCellHeight(46);
+        section.add(new JScrollPane(list), BorderLayout.CENTER);
+        return section;
+    }
+
+    private JComponent buildAutoAgentsSection() {
+        JPanel section = new JPanel(new BorderLayout());
+        section.add(sectionHeader("Auto Agents"), BorderLayout.NORTH);
+
+        autoList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        autoList.setCellRenderer(new AgentCell());
+        autoList.setFixedCellHeight(46);
+        JScrollPane scroll = new JScrollPane(autoList);
+        // Reserve a compact-but-visible area while empty; grows with auto agents.
+        scroll.setPreferredSize(new Dimension(0, 92));
+        scroll.setMinimumSize(new Dimension(0, 48));
+        section.add(scroll, BorderLayout.CENTER);
+        return section;
+    }
+
+    private JComponent buildMessageBoardsSection() {
+        JPanel section = new JPanel(new BorderLayout());
+        section.add(sectionHeader("Message Boards"), BorderLayout.NORTH);
+
+        for (AgentGroup g : AgentGroup.all()) {
+            boardListModel.addElement(g);
+        }
+        boardList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        boardList.setCellRenderer(new BoardCell());
+        boardList.setFixedCellHeight(26);
+        boardList.setToolTipText("Double-click a board to open it as a window");
+        JScrollPane scroll = new JScrollPane(boardList);
+        // All eight board rows are always shown in full (never shrunk away).
+        int boardsHeight = AgentGroup.all().size() * 26 + 4;
+        Dimension boardsSize = new Dimension(0, boardsHeight);
+        scroll.setPreferredSize(boardsSize);
+        scroll.setMinimumSize(boardsSize);
+        section.add(scroll, BorderLayout.CENTER);
+        return section;
+    }
+
+    private JComponent buildPurgeAllButton() {
+        JButton trash = new JButton("\uD83D\uDDD1"); // 🗑 wastebasket
+        trash.setToolTipText("Purge all stale agents");
+        trash.setMargin(new java.awt.Insets(0, 6, 0, 6));
+        trash.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 8));
+        trash.setFocusPainted(false);
+        trash.addActionListener(e -> confirmPurgeAll());
+        return trash;
+    }
+
+    private void confirmPurgeAll() {
+        List<Agent> stale = new java.util.ArrayList<>();
+        for (Agent a : model.agentsSorted()) {
+            if (!a.getStatus().isLive()) {
+                stale.add(a);
+            }
+        }
+        if (stale.isEmpty()) {
+            javax.swing.JOptionPane.showMessageDialog(this,
+                    "There are no offline agents to purge.",
+                    "Purge all stale agents", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int choice = javax.swing.JOptionPane.showConfirmDialog(this,
+                "Purge all stale agents?\n\n"
+                        + "This clears the retained MQTT registry topic for "
+                        + stale.size() + " offline agent" + (stale.size() == 1 ? "" : "s")
+                        + ",\nremoving them for every connected client. Live agents are\n"
+                        + "left untouched (a running agent re-registers itself).",
+                "Purge all stale agents", javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.WARNING_MESSAGE);
+        if (choice == javax.swing.JOptionPane.OK_OPTION) {
+            for (Agent a : stale) {
+                actions.purge(a);
+            }
+        }
+    }
+
     private JComponent buildLaunchBar() {
         JPanel bar = new JPanel(new BorderLayout());
-        bar.setBorder(BorderFactory.createEmptyBorder(6, 8, 8, 8));
+        bar.setBorder(BorderFactory.createEmptyBorder(0, 8, 6, 8));
         JButton launch = new JButton("＋ Launch agent ▾");
         launch.setToolTipText("Spawn a new agent on a running console host");
         launch.addActionListener(e -> showLaunchMenu(launch));
@@ -93,10 +225,15 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         manage.addActionListener(ev -> actions.openProfileManager());
         menu.add(manage);
 
-        menu.show(anchor, 0, -((int) menu.getPreferredSize().getHeight()));
+        // Anchored beneath the launch button (it now sits at the top of the section).
+        menu.show(anchor, 0, anchor.getHeight());
     }
 
-    private void installMouse() {
+    // ------------------------------------------------------------------
+    // Mouse handling
+    // ------------------------------------------------------------------
+
+    private void installAgentMouse() {
         list.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -116,6 +253,20 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
             @Override
             public void mouseReleased(MouseEvent e) {
                 maybePopup(e);
+            }
+        });
+    }
+
+    private void installBoardMouse() {
+        boardList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    AgentGroup g = boardList.getSelectedValue();
+                    if (g != null) {
+                        actions.openBoard(g);
+                    }
+                }
             }
         });
     }
@@ -184,6 +335,17 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         quit.addActionListener(ev -> confirmQuit(agent));
         menu.add(quit);
 
+        // Purge is only meaningful for stale/offline agents: it clears the
+        // retained registry topic so the dead agent disappears everywhere.
+        boolean offline = !agent.getStatus().isLive();
+        JMenuItem purge = new JMenuItem("Purge stale agent");
+        purge.setToolTipText(offline
+                ? "Clear this offline agent's retained MQTT registry topic"
+                : "Only available for offline agents");
+        purge.setEnabled(offline);
+        purge.addActionListener(ev -> confirmPurge(agent));
+        menu.add(purge);
+
         menu.show(e.getComponent(), e.getX(), e.getY());
     }
 
@@ -194,6 +356,22 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
                 javax.swing.JOptionPane.WARNING_MESSAGE);
         if (choice == javax.swing.JOptionPane.OK_OPTION) {
             actions.quit(agent);
+        }
+    }
+
+    private void confirmPurge(Agent agent) {
+        if (agent.getStatus().isLive()) {
+            return;
+        }
+        int choice = javax.swing.JOptionPane.showConfirmDialog(this,
+                "Purge offline agent \"" + agent.getName() + "\"?\n"
+                        + "This clears its retained MQTT registry topic so the stale\n"
+                        + "agent is removed for every connected client. It does not\n"
+                        + "affect a live agent (a running agent re-registers itself).",
+                "Purge stale agent", javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.WARNING_MESSAGE);
+        if (choice == javax.swing.JOptionPane.OK_OPTION) {
+            actions.purge(agent);
         }
     }
 
@@ -237,20 +415,13 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
 
     // ------------------------------------------------------------------
 
-    private Color statusColor(AgentStatus status) {
-        return switch (status) {
-            case BUSY -> theme.warning();
-            case IDLE, ONLINE -> theme.success();
-            case OFFLINE -> theme.error();
-            case UNKNOWN -> theme.muted();
-        };
-    }
-
-    /** Renders an agent row: status dot, name, and model/status subtitle. */
+    /** Renders an agent row: status dot, name, model/status subtitle, and group icon. */
     private final class AgentCell extends JPanel implements ListCellRenderer<Agent> {
         private final StatusDot dot = new StatusDot();
         private final JLabel name = new JLabel();
         private final JLabel subtitle = new JLabel();
+        private final ChainIcon groupIcon = new ChainIcon(16, AgentGroup.DEFAULT.color());
+        private final JLabel groupLabel = new JLabel();
 
         AgentCell() {
             super(new BorderLayout(8, 0));
@@ -261,8 +432,10 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
             subtitle.setFont(subtitle.getFont().deriveFont(Font.PLAIN, 11f));
             text.add(name);
             text.add(subtitle);
+            groupLabel.setIcon(groupIcon);
             add(dot, BorderLayout.WEST);
             add(text, BorderLayout.CENTER);
+            add(groupLabel, BorderLayout.EAST);
         }
 
         @Override
@@ -270,7 +443,10 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
                 int index, boolean isSelected, boolean cellHasFocus) {
             name.setText(value.getName());
             subtitle.setText(value.getStatus().label() + "  ·  " + value.modelLabel());
-            dot.color = statusColor(value.getStatus());
+            dot.setColor(StatusDot.colorFor(value.getStatus(), theme));
+            AgentGroup group = model.groupOf(value.getId());
+            groupIcon.setColor(group.color());
+            groupLabel.setToolTipText("Group: " + group.label());
 
             Color bg = isSelected ? list.getSelectionBackground() : list.getBackground();
             Color fg = isSelected ? list.getSelectionForeground() : list.getForeground();
@@ -282,24 +458,22 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         }
     }
 
-    private static final class StatusDot extends JComponent {
-        Color color = Color.GRAY;
-
-        StatusDot() {
-            setPreferredSize(new Dimension(14, 14));
-        }
+    /** Renders a message-board row: a colour-coded chain icon plus the group name. */
+    private final class BoardCell extends DefaultListCellRenderer {
+        private final ChainIcon icon = new ChainIcon(16, AgentGroup.DEFAULT.color());
 
         @Override
-        protected void paintComponent(java.awt.Graphics g) {
-            java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
-            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
-                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-            int d = 10;
-            int x = (getWidth() - d) / 2;
-            int y = (getHeight() - d) / 2;
-            g2.setColor(color);
-            g2.fillOval(x, y, d, d);
-            g2.dispose();
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                boolean isSelected, boolean cellHasFocus) {
+            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            AgentGroup g = (AgentGroup) value;
+            icon.setColor(g.color());
+            setIcon(icon);
+            setText(g.label() + " board");
+            setBorder(BorderFactory.createEmptyBorder(2, 10, 2, 10));
+            setIconTextGap(8);
+            return this;
         }
     }
+
 }

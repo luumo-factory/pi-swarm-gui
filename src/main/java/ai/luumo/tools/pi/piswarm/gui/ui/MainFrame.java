@@ -6,7 +6,10 @@ import ai.luumo.tools.pi.piswarm.gui.config.ModelRef;
 import ai.luumo.tools.pi.piswarm.gui.config.Profile;
 import ai.luumo.tools.pi.piswarm.gui.config.ProfilesConfig;
 import ai.luumo.tools.pi.piswarm.gui.config.SessionConfig;
+import ai.luumo.tools.pi.piswarm.gui.history.HistoryStore;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
+import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
+import ai.luumo.tools.pi.piswarm.gui.model.AgentGroup;
 import ai.luumo.tools.pi.piswarm.gui.model.ConsoleInfo;
 import ai.luumo.tools.pi.piswarm.gui.mqtt.SwarmClient;
 import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
@@ -39,7 +42,9 @@ import java.awt.event.WindowEvent;
 import java.beans.PropertyVetoException;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -58,6 +63,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     private final Path appConfigPath;
     private final Path sessionPath;
     private final Path profilesPath;
+    private final HistoryStore history;
     private Rectangle mainNormalBounds;
     private ProfileManagerDialog profileManager;
     /**
@@ -66,6 +72,13 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
      * over MQTT, so we defer those until the agent appears.
      */
     private final java.util.Set<String> pendingWindowRestores = new java.util.HashSet<>();
+    /**
+     * Agent ids we just manually launched from the GUI and want to auto-open a
+     * monitor window for as soon as they register over MQTT. The spawn_result
+     * reply and the registry payload can arrive in either order, so we record
+     * the id here and open the monitor whichever arrives second.
+     */
+    private final java.util.Set<String> pendingAutoOpen = new java.util.HashSet<>();
 
     private final JDesktopPane desktop = new JDesktopPane();
     private final SnappingDesktopManager desktopManager = new SnappingDesktopManager();
@@ -73,14 +86,15 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     private int prevDesktopH;
     private final JLabel statusBar = new JLabel();
     private final Map<String, AgentControlDialog> controlDialogs = new HashMap<>();
-    private JInternalFrame boardFrame;
+    private final Map<AgentGroup, JInternalFrame> boardFrames = new EnumMap<>(AgentGroup.class);
     private JInternalFrame debugFrame;
     private DebugPanel debugPanel;
     private JCheckBoxMenuItem debugMenuItem;
 
     public MainFrame(AppConfig config, SwarmModel model, SwarmClient client, ThemeManager theme,
                      SessionConfig session, ProfilesConfig profiles,
-                     Path appConfigPath, Path sessionPath, Path profilesPath) {
+                     Path appConfigPath, Path sessionPath, Path profilesPath,
+                     HistoryStore history) {
         super("Pi Swarm Monitor");
         this.config = config;
         this.model = model;
@@ -91,6 +105,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         this.appConfigPath = appConfigPath;
         this.sessionPath = sessionPath;
         this.profilesPath = profilesPath;
+        this.history = history;
 
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setSize(1200, 760);
@@ -130,7 +145,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
                 prevDesktopH = h;
             }
         });
-        openBoard();
+        openBoard(AgentGroup.DEFAULT);
 
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, agentList, desktop);
         split.setDividerLocation(260);
@@ -142,9 +157,105 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         setJMenuBar(buildMenuBar());
 
         model.addListener(this);
+        theme.addThemeListener(this::restyleSubWindows);
+        installWindowNavigation();
         updateStatusBar();
         restoreMainState();
         restoreOpenWindows();
+    }
+
+    // ------------------------------------------------------------------
+    // Spatial window navigation (Ctrl + arrow keys)
+    // ------------------------------------------------------------------
+
+    private enum Direction { LEFT, RIGHT, UP, DOWN }
+
+    /**
+     * Bind Ctrl+Arrow to move selection to the open window immediately in that
+     * direction (by on-screen position). Registered at the window level so it
+     * works regardless of which child component currently holds focus.
+     */
+    private void installWindowNavigation() {
+        javax.swing.JComponent root = getRootPane();
+        javax.swing.InputMap im = root.getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
+        javax.swing.ActionMap am = root.getActionMap();
+        bindNav(im, am, java.awt.event.KeyEvent.VK_LEFT, "nav-left", Direction.LEFT);
+        bindNav(im, am, java.awt.event.KeyEvent.VK_RIGHT, "nav-right", Direction.RIGHT);
+        bindNav(im, am, java.awt.event.KeyEvent.VK_UP, "nav-up", Direction.UP);
+        bindNav(im, am, java.awt.event.KeyEvent.VK_DOWN, "nav-down", Direction.DOWN);
+    }
+
+    private void bindNav(javax.swing.InputMap im, javax.swing.ActionMap am, int keyCode,
+                         String name, Direction dir) {
+        im.put(javax.swing.KeyStroke.getKeyStroke(keyCode, java.awt.event.InputEvent.CTRL_DOWN_MASK), name);
+        am.put(name, new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                navigateWindow(dir);
+            }
+        });
+    }
+
+    /** Select the open internal frame nearest in the given on-screen direction. */
+    private void navigateWindow(Direction dir) {
+        java.util.List<JInternalFrame> frames = new java.util.ArrayList<>();
+        for (JInternalFrame f : desktop.getAllFrames()) {
+            if (!f.isClosed() && f.isVisible() && !f.isIcon()) {
+                frames.add(f);
+            }
+        }
+        if (frames.size() < 2) {
+            return;
+        }
+        JInternalFrame current = desktop.getSelectedFrame();
+        if (current == null || !frames.contains(current)) {
+            selectFrame(frames.get(0));
+            return;
+        }
+
+        Rectangle cb = current.getBounds();
+        double cx = cb.getCenterX();
+        double cy = cb.getCenterY();
+        JInternalFrame best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (JInternalFrame f : frames) {
+            if (f == current) {
+                continue;
+            }
+            Rectangle b = f.getBounds();
+            double dx = b.getCenterX() - cx;
+            double dy = b.getCenterY() - cy;
+            double along;
+            double perp;
+            switch (dir) {
+                case LEFT -> { along = -dx; perp = Math.abs(dy); }
+                case RIGHT -> { along = dx; perp = Math.abs(dy); }
+                case UP -> { along = -dy; perp = Math.abs(dx); }
+                default -> { along = dy; perp = Math.abs(dx); }
+            }
+            if (along <= 0) {
+                continue; // not on the requested side
+            }
+            // Favour the closest frame along the axis, penalising perpendicular
+            // offset so "right" prefers a true neighbour over a diagonal one.
+            double score = along + perp * 3;
+            if (score < bestScore) {
+                bestScore = score;
+                best = f;
+            }
+        }
+        if (best != null) {
+            selectFrame(best);
+        }
+    }
+
+    private void selectFrame(JInternalFrame f) {
+        f.toFront();
+        try {
+            f.setSelected(true);
+        } catch (PropertyVetoException ignored) {
+            // not fatal
+        }
     }
 
     /**
@@ -156,6 +267,10 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         for (String id : session.getOpenWindows()) {
             if (SessionConfig.DEBUG.equals(id)) {
                 openDebug();
+            } else if (SessionConfig.BOARD.equals(id)) {
+                openBoard(AgentGroup.DEFAULT);
+            } else if (id.startsWith("board:")) {
+                openBoard(AgentGroup.fromId(id.substring("board:".length())));
             } else if (id.startsWith("monitor:") || id.startsWith("controls:")) {
                 pendingWindowRestores.add(id);
                 // If the agent is already known (retained registry delivered fast),
@@ -226,6 +341,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
             return;
         }
         profileManager = new ProfileManagerDialog(this, profiles, this::persistProfiles);
+        theme.styleSubWindow(profileManager.getContentPane());
         profileManager.setVisible(true);
         raise(profileManager);
     }
@@ -283,8 +399,10 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         if (f instanceof AgentMonitorFrame m) {
             return SessionConfig.monitor(m.getAgentId());
         }
-        if (f == boardFrame) {
-            return SessionConfig.BOARD;
+        for (Map.Entry<AgentGroup, JInternalFrame> e : boardFrames.entrySet()) {
+            if (f == e.getValue()) {
+                return SessionConfig.board(e.getKey().id());
+            }
         }
         if (f == debugFrame) {
             return SessionConfig.DEBUG;
@@ -338,7 +456,9 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         }
         for (Map.Entry<String, AgentControlDialog> e : controlDialogs.entrySet()) {
             AgentControlDialog dialog = e.getValue();
-            if (dialog != null && dialog.isDisplayable()) {
+            // Use isVisible (not isDisplayable): a dialog the user closed may
+            // still be displayable, but it should not be restored next launch.
+            if (dialog != null && dialog.isVisible()) {
                 open.add(SessionConfig.controls(e.getKey()));
             }
         }
@@ -359,9 +479,26 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         persistProfiles();
     }
 
+    /**
+     * Save each messaging window's scrollback so it can be restored next launch.
+     * Only currently-known agents are written; {@link HistoryStore#persist} prunes
+     * files for agents that are no longer live so the directory stays bounded.
+     */
+    private void persistHistory() {
+        if (history == null) {
+            return;
+        }
+        Map<String, List<AgentEvent>> feeds = new LinkedHashMap<>();
+        for (Agent agent : model.agents()) {
+            feeds.put(agent.getId(), model.eventsFor(agent.getId()));
+        }
+        history.persist(feeds, model.allBoardPosts());
+    }
+
     private void performExit() {
         captureSession();
         persistConfigs();
+        persistHistory();
         client.disconnect();
         dispose();
         System.exit(0);
@@ -443,10 +580,11 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         cascade.addActionListener(e -> cascadeFrames());
         JCheckBoxMenuItem showBoard = new JCheckBoxMenuItem("Show board", true);
         showBoard.addActionListener(e -> {
+            JInternalFrame red = boardFrames.get(AgentGroup.DEFAULT);
             if (showBoard.isSelected()) {
-                openBoard();
-            } else if (boardFrame != null) {
-                boardFrame.dispose();
+                openBoard(AgentGroup.DEFAULT);
+            } else if (red != null) {
+                red.dispose();
             }
         });
         window.add(tile);
@@ -479,20 +617,49 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     // Internal frame management
     // ------------------------------------------------------------------
 
-    private void openBoard() {
-        if (boardFrame != null && !boardFrame.isClosed()) {
-            boardFrame.toFront();
+    @Override
+    public void openBoard(AgentGroup group) {
+        JInternalFrame existing = boardFrames.get(group);
+        if (existing != null && !existing.isClosed()) {
+            existing.toFront();
+            try {
+                existing.setSelected(true);
+            } catch (PropertyVetoException ignored) {
+                // not fatal
+            }
             return;
         }
-        BoardPanel panel = new BoardPanel(model, theme, client::postToBoard);
-        boardFrame = new JInternalFrame("Message board", true, true, true, true);
-        boardFrame.setFrameIcon(null);
-        boardFrame.setContentPane(panel);
-        restoreInternal(boardFrame, SessionConfig.BOARD, new Rectangle(20, 20, 620, 420));
-        boardFrame.setVisible(true);
-        desktop.add(boardFrame);
+        BoardPanel panel = new BoardPanel(group, model, theme,
+                (text, urgent) -> client.postToBoard(group.id(), text, urgent),
+                () -> {
+                    client.clearBoard(group.id());
+                    model.clearBoard(group);
+                });
+        JInternalFrame frame = new JInternalFrame(group.label() + " board", true, true, true, true);
+        frame.setFrameIcon(null);
+        frame.setContentPane(panel);
+        theme.styleSubWindow(panel);
+        frame.addInternalFrameListener(new javax.swing.event.InternalFrameAdapter() {
+            @Override
+            public void internalFrameActivated(javax.swing.event.InternalFrameEvent e) {
+                // Focusing the board window drops the cursor into the broadcast box.
+                panel.focusInput();
+            }
+
+            @Override
+            public void internalFrameClosed(javax.swing.event.InternalFrameEvent e) {
+                boardFrames.remove(group);
+            }
+        });
+        // Cascade non-default boards slightly so opening several doesn't fully overlap.
+        int slot = group.ordinal();
+        restoreInternal(frame, SessionConfig.board(group.id()),
+                new Rectangle(20 + slot * 24, 20 + slot * 24, 620, 420));
+        boardFrames.put(group, frame);
+        frame.setVisible(true);
+        desktop.add(frame);
         try {
-            boardFrame.setSelected(true);
+            frame.setSelected(true);
         } catch (PropertyVetoException ignored) {
             // not fatal
         }
@@ -507,6 +674,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         debugFrame = new JInternalFrame("MQTT debug", true, true, true, true);
         debugFrame.setFrameIcon(null);
         debugFrame.setContentPane(debugPanel);
+        theme.styleSubWindow(debugPanel);
         restoreInternal(debugFrame, SessionConfig.DEBUG, new Rectangle(60, 60, 820, 480));
         debugFrame.addInternalFrameListener(new javax.swing.event.InternalFrameAdapter() {
             @Override
@@ -628,8 +796,27 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     }
 
     @Override
+    public void setGroup(Agent agent, AgentGroup group) {
+        // Optimistically reflect the new group in the UI, then ask the agent's
+        // extension to re-bind to that group's board topic. The registry republish
+        // that follows confirms it.
+        model.setAgentGroup(agent.getId(), group);
+        client.setGroup(agent.getId(), group.id());
+    }
+
+    @Override
     public void quit(Agent agent) {
         client.quitAgent(agent.getId());
+    }
+
+    @Override
+    public void purge(Agent agent) {
+        // Guard: only purge genuinely offline agents. A live agent republishes
+        // its retained registry entry, so purging it would only briefly hide it.
+        if (agent.getStatus().isLive()) {
+            return;
+        }
+        client.purgeAgent(agent.getId());
     }
 
     @Override
@@ -676,6 +863,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
             dialog.setBounds(saved.bounds());
         }
         controlDialogs.put(agent.getId(), dialog);
+        theme.styleSubWindow(dialog.getContentPane());
         dialog.setVisible(true);
         raise(dialog);
     }
@@ -714,6 +902,7 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
             int count = desktop.getAllFrames().length;
             frame.setLocation(40 + (count % 6) * 26, 40 + (count % 6) * 26);
         }
+        theme.styleSubWindow(frame.getContentPane());
         frame.setVisible(true);
         desktop.add(frame);
         try {
@@ -721,6 +910,24 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         } catch (PropertyVetoException ignored) {
             // ignore
         }
+    }
+
+    /** Re-apply the darker sub-window tint after a theme change. */
+    private void restyleSubWindows() {
+        for (JInternalFrame f : desktop.getAllFrames()) {
+            if (!f.isClosed()) {
+                theme.styleSubWindow(f.getContentPane());
+            }
+        }
+        for (AgentControlDialog dialog : controlDialogs.values()) {
+            if (dialog != null && dialog.isDisplayable()) {
+                theme.styleSubWindow(dialog.getContentPane());
+            }
+        }
+        if (profileManager != null && profileManager.isDisplayable()) {
+            theme.styleSubWindow(profileManager.getContentPane());
+        }
+        desktop.repaint();
     }
 
     // ------------------------------------------------------------------
@@ -744,6 +951,10 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
         if (!pendingWindowRestores.isEmpty()) {
             restorePendingFor(agent);
         }
+        // A just-launched agent has registered: open and focus its monitor.
+        if (pendingAutoOpen.remove(agent.getId())) {
+            openMonitor(agent);
+        }
     }
 
     @Override
@@ -760,6 +971,16 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
                 JsonNode agent = reply.get("agent");
                 String name = agent != null && agent.hasNonNull("name") ? agent.get("name").asText() : "agent";
                 statusBar.setText("spawned " + name);
+                // Auto-open (and focus) the monitor for the agent we just launched.
+                String id = agent != null && agent.hasNonNull("id") ? agent.get("id").asText() : null;
+                if (id != null && !id.isBlank()) {
+                    Agent known = model.agent(id);
+                    if (known != null) {
+                        openMonitor(known);
+                    } else {
+                        pendingAutoOpen.add(id);
+                    }
+                }
             } else {
                 JOptionPane.showMessageDialog(this,
                         "Spawn failed: " + (reply.hasNonNull("error") ? reply.get("error").asText() : "unknown error"),

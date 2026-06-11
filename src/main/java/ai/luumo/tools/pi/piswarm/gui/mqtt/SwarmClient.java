@@ -150,7 +150,10 @@ public final class SwarmClient implements MqttCallbackExtended {
         client.subscribe(topics.registryWildcard(), 1);
         client.subscribe(topics.agentOutWildcard(), 1);
         client.subscribe(topics.agentControlOutWildcard(), 1);
+        // Both the default (red) board and every per-group board, so all eight
+        // boards are cached in the background regardless of which is displayed.
         client.subscribe(topics.board(), 1);
+        client.subscribe(topics.boardSubWildcard(), 1);
         // Console (spawn host) plane. console/in is subscribed too so the debug
         // view mirrors the spawn requests this GUI publishes.
         client.subscribe(topics.consoleRegistryWildcard(), 1);
@@ -180,8 +183,13 @@ public final class SwarmClient implements MqttCallbackExtended {
         }
     }
 
-    /** Post a message to the shared board as the configured orchestrator identity. */
+    /** Post a message to the default ({@code red}) board as the orchestrator identity. */
     public void postToBoard(String text, boolean urgent) {
+        postToBoard("red", text, urgent);
+    }
+
+    /** Post a message to a specific group's board as the configured orchestrator identity. */
+    public void postToBoard(String group, String text, boolean urgent) {
         ObjectNode node = mapper.createObjectNode();
         node.put("seq", boardSeq.incrementAndGet());
         ObjectNode from = node.putObject("from");
@@ -190,7 +198,21 @@ public final class SwarmClient implements MqttCallbackExtended {
         node.put("text", text);
         node.put("urgent", urgent);
         node.put("ts", System.currentTimeMillis());
-        publish(topics.board(), node, false);
+        publish(topics.board(group), node, false);
+    }
+
+    /**
+     * Clear a group's board at the broker by publishing an empty retained
+     * payload (a tombstone) to the board topic.
+     *
+     * <p>Note: ordinary board posts are published <em>non-retained</em>, so the
+     * broker normally holds no shared board state — each client accumulates its
+     * own local history as posts arrive. This tombstone therefore only removes a
+     * retained board message if one exists; it cannot force already-connected
+     * clients to drop history they have already displayed.</p>
+     */
+    public void clearBoard(String group) {
+        publish(topics.board(group), "", true);
     }
 
     /** Send normal (idle-gated) work to an agent. */
@@ -233,11 +255,35 @@ public final class SwarmClient implements MqttCallbackExtended {
         publish(topics.agentControlIn(agentId), node, false);
     }
 
+    /**
+     * Move the agent to a colour-coded group. The agent's extension re-binds to
+     * that group's board topic ({@code NS/board} for red, {@code NS/board/<group>}
+     * otherwise) and re-publishes its registry with the new group.
+     */
+    public void setGroup(String agentId, String groupId) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("action", "set_group");
+        node.put("group", groupId);
+        publish(topics.agentControlIn(agentId), node, false);
+    }
+
     /** Ask the agent to shut down gracefully (equivalent to the in-TUI {@code /quit}). */
     public void quitAgent(String agentId) {
         ObjectNode node = mapper.createObjectNode();
         node.put("action", "quit");
         publish(topics.agentControlIn(agentId), node, false);
+    }
+
+    /**
+     * Purge a stale (offline) agent by clearing its retained registry topic.
+     * Publishes an empty payload with {@code retain=true}, which deletes the
+     * retained message at the broker so the agent disappears from every client.
+     *
+     * <p>Only call this for agents that are genuinely offline: a live agent
+     * republishes its registry entry, so purging one would only briefly hide it.</p>
+     */
+    public void purgeAgent(String agentId) {
+        publish(topics.registry(agentId), "", true);
     }
 
     /**
@@ -264,6 +310,14 @@ public final class SwarmClient implements MqttCallbackExtended {
             node.put("console", consoleId);
         }
         node.put("reqId", "gui-" + Long.toHexString(System.nanoTime()));
+        // Working directory: the profile's configured dir, or the user's home
+        // directory when none was supplied.
+        String cwd = profile != null
+                ? profile.resolvedWorkingDir()
+                : System.getProperty("user.home", "");
+        if (cwd != null && !cwd.isBlank()) {
+            node.put("cwd", cwd.trim());
+        }
         if (profile != null) {
             if (profile.getAgentName() != null && !profile.getAgentName().isBlank()) {
                 node.put("name", profile.getAgentName().trim());
@@ -380,8 +434,9 @@ public final class SwarmClient implements MqttCallbackExtended {
             handleConsoleOut(payload);
             return;
         }
-        if (topic.equals(topics.board())) {
-            handleBoard(payload);
+        String boardGroup = topics.groupFromBoard(topic);
+        if (boardGroup != null) {
+            handleBoard(boardGroup, payload);
         }
     }
 
@@ -409,6 +464,10 @@ public final class SwarmClient implements MqttCallbackExtended {
             // Only count it as a real status update when the payload actually carried
             // a recognized status; stale/partial registry topics stay hidden.
             agent.setStatusKnown(n.hasNonNull("status") && status != AgentStatus.UNKNOWN);
+            if (n.hasNonNull("group")) {
+                agent.setGroup(ai.luumo.tools.pi.piswarm.gui.model.AgentGroup.fromId(n.get("group").asText()));
+                agent.setGroupReported(true);
+            }
             agent.setModel(parseModel(n.get("model")));
             agent.setAvailableModels(parseModels(n.get("availableModels")));
             agent.setExtensions(parseExtensions(n.get("extensions")));
@@ -489,7 +548,11 @@ public final class SwarmClient implements MqttCallbackExtended {
         }
     }
 
-    private void handleBoard(String payload) {
+    private void handleBoard(String group, String payload) {
+        if (payload == null || payload.isBlank()) {
+            // Retained tombstone clear: nothing to surface.
+            return;
+        }
         try {
             JsonNode n = mapper.readTree(payload);
             JsonNode from = n.get("from");
@@ -499,7 +562,8 @@ public final class SwarmClient implements MqttCallbackExtended {
                     from != null ? text(from, "name", "?") : "?",
                     text(n, "text", ""),
                     n.hasNonNull("urgent") && n.get("urgent").asBoolean(),
-                    n.hasNonNull("ts") ? n.get("ts").asLong() : System.currentTimeMillis());
+                    n.hasNonNull("ts") ? n.get("ts").asLong() : System.currentTimeMillis(),
+                    group);
             listeners.forEach(l -> l.onBoardPost(post));
         } catch (Exception e) {
             System.err.println("bad board payload: " + e.getMessage());

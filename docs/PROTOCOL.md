@@ -13,12 +13,23 @@ extension. There are two planes:
 
 | Topic | Retained | Payload | Used for |
 |-------|----------|---------|----------|
-| `NS/registry/ID` | ✅ + LWT | `{ id, name, status, model, availableModels, extensions, tools, pid, cwd, startedAt, ts }` | Agent list, busy/idle, current + available models, extension/tool state |
+| `NS/registry/ID` | ✅ + LWT | `{ id, name, status, group, model, availableModels, extensions, tools, pid, cwd, startedAt, ts }` | Agent list, busy/idle, group, current + available models, extension/tool state |
 | `NS/agents/ID/out` | – | work events `{ type, ts, ... }` | Per-agent monitor feed |
 | `NS/agents/ID/control/out` | – | control replies `{ id, type, ts, ... }` | Merged into the monitor feed; drives the controls dialog |
-| `NS/board` | – | `{ seq, from:{id,name}, text, urgent, ts }` | Shared board |
+| `NS/board` | ✅ | `{ seq, from:{id,name}, text, urgent, ts }` | Default (`red`) group board |
+| `NS/board/<group>` | ✅ | `{ seq, from:{id,name}, text, urgent, ts }` | Per-group board (orange…pink) |
 
-`status` ∈ `online | busy | idle | offline`.
+> **Colour-coded group boards:** agents are organised into eight colour-coded
+> groups (`red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`, `pink`)
+> that share a per-group board. The default `red` group keeps the legacy
+> `NS/board` topic; every other group uses `NS/board/<group>`. The GUI subscribes
+> to `NS/board` **and** `NS/board/+` so all eight boards are cached in the
+> background. The group is derived from the topic, not the payload.
+
+`status` ∈ `online | busy | idle | offline`. `group` ∈ `red | orange | yellow |
+green | cyan | blue | purple | pink` (default `red`); it determines which board
+topic the agent binds to. A `set_group` control reply is `{ type: "group", ok,
+group, changed }`.
 
 `model` is `{ provider, id, name }`. `availableModels` is `[{ provider, id, name }]`
 (models the agent can actually switch to). `extensions` is
@@ -42,7 +53,7 @@ Unknown types render as a muted note, so new ones are safe to add.
 
 | Topic | Payload | Trigger |
 |-------|---------|---------|
-| `NS/board` | `{ seq, from:{id,name}, text, urgent, ts }` | Board "Post" box |
+| `NS/board` / `NS/board/<group>` | `{ seq, from:{id,name}, text, urgent, ts }` | Board "Post" box (topic = selected group's board) |
 | `NS/agents/ID/in` | `{ text }` | Monitor "Send" (normal) |
 | `NS/agents/ID/interrupt` | `{ text }` | Monitor "Send" with *urgent* (injects/steers) |
 | `NS/agents/ID/control/in` | `{ action, ... }` | Buttons / context menu / controls dialog |
@@ -53,6 +64,7 @@ Control actions published by the GUI:
 { "action": "abort" }                                           // Stop button — cancels the running turn
 { "action": "set_model", "provider": "...", "modelId": "..." }  // Toggle model / Set model / dialog
 { "action": "reset" }                                           // Reset context
+{ "action": "set_group", "group": "blue" }                      // Move agent to a colour-coded group (re-binds its board topic)
 { "action": "ping" }                                            // (programmatic)
 { "action": "status" }                                          // controls dialog "Request status"
 { "action": "enable_extension",  "extension": "<id|path|name>" }

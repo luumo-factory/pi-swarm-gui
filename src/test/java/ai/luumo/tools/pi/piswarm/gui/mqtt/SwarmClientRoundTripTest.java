@@ -98,6 +98,58 @@ class SwarmClientRoundTripTest {
     }
 
     @Test
+    void purgeClearsRetainedRegistry() throws Exception {
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        SwarmClient client = new SwarmClient(config());
+        CountDownLatch added = new CountDownLatch(1);
+        CountDownLatch removed = new CountDownLatch(1);
+        AtomicReference<String> removedId = new AtomicReference<>();
+        client.addListener(new SwarmListener() {
+            @Override
+            public void onAgentUpdated(Agent agent) {
+                added.countDown();
+            }
+
+            @Override
+            public void onAgentRemoved(String agentId) {
+                removedId.set(agentId);
+                removed.countDown();
+            }
+        });
+        client.connect();
+        TimeUnit.MILLISECONDS.sleep(300);
+
+        // A stale offline agent left behind on a retained registry topic.
+        publish("swarm-test/registry/stale-1",
+                "{\"id\":\"stale-1\",\"name\":\"Stale\",\"status\":\"offline\",\"ts\":1}", true);
+        assertTrue(added.await(5, TimeUnit.SECONDS), "stale agent not received");
+
+        client.purgeAgent("stale-1");
+
+        assertTrue(removed.await(5, TimeUnit.SECONDS), "purge did not clear the retained registry");
+        assertEquals("stale-1", removedId.get());
+
+        // A brand-new subscriber must not see the purged retained message.
+        SwarmClient fresh = new SwarmClient(config());
+        AtomicReference<Agent> lateJoin = new AtomicReference<>();
+        fresh.addListener(new SwarmListener() {
+            @Override
+            public void onAgentUpdated(Agent agent) {
+                if ("stale-1".equals(agent.getId())) {
+                    lateJoin.set(agent);
+                }
+            }
+        });
+        fresh.connect();
+        TimeUnit.MILLISECONDS.sleep(500);
+        assertEquals(null, lateJoin.get(), "purged agent still retained for late joiners");
+        fresh.disconnect();
+
+        client.disconnect();
+    }
+
+    @Test
     void receivesControlReply() throws Exception {
         assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
 
@@ -267,6 +319,68 @@ class SwarmClientRoundTripTest {
         assertEquals("./review-ext.ts", n.get("extensions").get(0).asText());
 
         client.disconnect();
+    }
+
+    @Test
+    void setGroupPublishesControlAction() throws Exception {
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        // The GUI client does not subscribe to control/in, so observe the publish
+        // with an independent subscriber on that topic.
+        MqttClient sub = new MqttClient("tcp://127.0.0.1:1883",
+                "it-sub-" + System.nanoTime(), new MemoryPersistence());
+        sub.connect();
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> received = new AtomicReference<>();
+        sub.subscribe("swarm-test/agents/coder-1/control/in", (t, m) -> {
+            received.set(new String(m.getPayload(), StandardCharsets.UTF_8));
+            latch.countDown();
+        });
+
+        SwarmClient client = new SwarmClient(config());
+        client.connect();
+        TimeUnit.MILLISECONDS.sleep(300);
+
+        client.setGroup("coder-1", "blue");
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "set_group control not observed");
+        JsonNode n = new ObjectMapper().readTree(received.get());
+        assertEquals("set_group", n.get("action").asText());
+        assertEquals("blue", n.get("group").asText());
+
+        client.disconnect();
+        sub.disconnect();
+        sub.close();
+    }
+
+    @Test
+    void registryReportsGroup() throws Exception {
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        SwarmClient client = new SwarmClient(config());
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<Agent> received = new AtomicReference<>();
+        client.addListener(new SwarmListener() {
+            @Override
+            public void onAgentUpdated(Agent agent) {
+                received.set(agent);
+                latch.countDown();
+            }
+        });
+        client.connect();
+        TimeUnit.MILLISECONDS.sleep(300);
+
+        publish("swarm-test/registry/grouped-1",
+                "{\"id\":\"grouped-1\",\"name\":\"Grouped\",\"status\":\"idle\",\"group\":\"purple\",\"ts\":1}",
+                true);
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "grouped registry not received");
+        Agent a = received.get();
+        assertEquals(ai.luumo.tools.pi.piswarm.gui.model.AgentGroup.PURPLE, a.getGroup());
+        assertTrue(a.isGroupReported());
+
+        client.disconnect();
+        clearRetained("swarm-test/registry/grouped-1");
     }
 
     @Test

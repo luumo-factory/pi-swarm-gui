@@ -4,6 +4,7 @@ import ai.luumo.tools.pi.piswarm.gui.config.AppConfig;
 import ai.luumo.tools.pi.piswarm.gui.config.ConfigLoader;
 import ai.luumo.tools.pi.piswarm.gui.config.ProfilesConfig;
 import ai.luumo.tools.pi.piswarm.gui.config.SessionConfig;
+import ai.luumo.tools.pi.piswarm.gui.history.HistoryStore;
 import ai.luumo.tools.pi.piswarm.gui.mqtt.SwarmClient;
 import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
 import ai.luumo.tools.pi.piswarm.gui.ui.MainFrame;
@@ -36,6 +37,7 @@ public final class App {
         final SessionConfig session = ConfigLoader.loadSession(sessionPath);
         Path profilesPath = ConfigLoader.profilesPath(configPath);
         final ProfilesConfig profiles = ConfigLoader.loadProfiles(profilesPath);
+        final HistoryStore history = new HistoryStore(ConfigLoader.historyDir(configPath));
 
         ThemeManager theme = new ThemeManager();
         theme.apply(ThemeManager.Theme.from(cfg.getUi().getTheme()));
@@ -45,8 +47,13 @@ public final class App {
         client.addListener(model);
 
         SwingUtilities.invokeLater(() -> {
+            // Restore saved window scrollback before building the UI so the board
+            // and per-agent monitors replay it as soon as they open.
+            model.seedEvents(history.loadEvents());
+            model.seedBoard(history.loadBoard());
+
             MainFrame frame = new MainFrame(cfg, model, client, theme, session, profiles,
-                    configPath, sessionPath, profilesPath);
+                    configPath, sessionPath, profilesPath, history);
             frame.setVisible(true);
 
             // Connect off the EDT (so a slow/missing broker never freezes the UI),

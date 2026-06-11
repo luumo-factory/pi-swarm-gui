@@ -3,6 +3,7 @@ package ai.luumo.tools.pi.piswarm.gui.ui;
 import ai.luumo.tools.pi.piswarm.gui.config.ModelRef;
 import ai.luumo.tools.pi.piswarm.gui.config.Profile;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
+import ai.luumo.tools.pi.piswarm.gui.model.AgentGroup;
 
 import java.util.List;
 
@@ -30,8 +31,20 @@ public interface AgentActions {
     /** Shut the agent down gracefully (equivalent to {@code /quit}). */
     void quit(Agent agent);
 
+    /**
+     * Purge a stale, offline agent by clearing its retained registry topic
+     * (empty {@code retain=true} payload). Only valid for offline agents.
+     */
+    void purge(Agent agent);
+
     /** Open (or focus) the per-agent monitor window. */
     void openMonitor(Agent agent);
+
+    /** Open (or focus) the message-board window for a colour-coded group. */
+    void openBoard(AgentGroup group);
+
+    /** Move the agent to a colour-coded group (re-binds its board topic via the extension). */
+    void setGroup(Agent agent, AgentGroup group);
 
     /** Open the per-agent control/details dialog (model, extensions, tools). */
     void openControls(Agent agent);

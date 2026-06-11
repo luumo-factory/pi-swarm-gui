@@ -19,6 +19,8 @@ public final class ConfigLoader {
     public static final String APP_CONFIG_FILE = "app-config.json";
     public static final String SESSION_CONFIG_FILE = "session-config.json";
     public static final String PROFILES_CONFIG_FILE = "profiles-config.json";
+    /** Sub-directory (beside the config files) holding per-window scrollback. */
+    public static final String HISTORY_DIR = "history";
     /** Pre-rename app-config filename, migrated forward if found. */
     public static final String LEGACY_CONFIG_FILE = "config.json";
 
@@ -56,6 +58,11 @@ public final class ConfigLoader {
     /** Profiles-config path sitting next to the given app-config path. */
     public static Path profilesPath(Path appConfigPath) {
         return sibling(appConfigPath, PROFILES_CONFIG_FILE);
+    }
+
+    /** Window-history directory sitting next to the given app-config path. */
+    public static Path historyDir(Path appConfigPath) {
+        return sibling(appConfigPath, HISTORY_DIR);
     }
 
     private static Path sibling(Path appConfigPath, String fileName) {

@@ -23,6 +23,10 @@ public final class Agent {
     private String cwd;
     private long startedAt;
     private long lastSeen;
+    /** Colour-coded group this agent belongs to (defaults to red). */
+    private AgentGroup group = AgentGroup.DEFAULT;
+    /** True when the latest registry payload actually carried a {@code group} field. */
+    private boolean groupReported;
 
     public Agent(String id) {
         this.id = id;
@@ -122,6 +126,22 @@ public final class Agent {
 
     public void setLastSeen(long lastSeen) {
         this.lastSeen = lastSeen;
+    }
+
+    public AgentGroup getGroup() {
+        return group;
+    }
+
+    public void setGroup(AgentGroup group) {
+        this.group = group == null ? AgentGroup.DEFAULT : group;
+    }
+
+    public boolean isGroupReported() {
+        return groupReported;
+    }
+
+    public void setGroupReported(boolean groupReported) {
+        this.groupReported = groupReported;
     }
 
     public String modelLabel() {

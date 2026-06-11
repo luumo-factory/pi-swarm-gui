@@ -4,11 +4,24 @@ import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 
+import javax.swing.JInternalFrame;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
+import javax.swing.JToolBar;
+import javax.swing.JTree;
+import javax.swing.JViewport;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.swing.text.JTextComponent;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Insets;
 import java.awt.Window;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Manages the FlatLaf light/dark look and feel and exposes the accent colours
@@ -26,8 +39,20 @@ public final class ThemeManager {
 
     private Theme theme = Theme.DARK;
 
+    /** Callbacks run after every theme change so windows can re-apply derived styling. */
+    private final List<Runnable> themeListeners = new CopyOnWriteArrayList<>();
+
     public Theme getTheme() {
         return theme;
+    }
+
+    /** Register a callback fired (on the EDT) after each {@link #apply} completes. */
+    public void addThemeListener(Runnable listener) {
+        themeListeners.add(listener);
+    }
+
+    public void removeThemeListener(Runnable listener) {
+        themeListeners.remove(listener);
     }
 
     public boolean isDark() {
@@ -62,6 +87,68 @@ public final class ThemeManager {
         for (Window w : Window.getWindows()) {
             SwingUtilities.updateComponentTreeUI(w);
         }
+
+        // updateComponentTreeUI reinstalls UIManager defaults, so any derived
+        // sub-window tint has to be re-applied afterwards.
+        for (Runnable listener : themeListeners) {
+            listener.run();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Sub-window tinting
+    // ------------------------------------------------------------------
+
+    /**
+     * Background used for the content of secondary windows (agent monitors, the
+     * message board, the debug view, control dialogs) so they read as a distinct,
+     * slightly darker surface than the main application background.
+     */
+    public Color subWindowBackground() {
+        Color base = UIManager.getColor("Panel.background");
+        if (base == null) {
+            base = isDark() ? new Color(0x2b2b2b) : new Color(0xf2f2f2);
+        }
+        double factor = isDark() ? 0.82 : 0.92;
+        return new Color(
+                (int) Math.round(base.getRed() * factor),
+                (int) Math.round(base.getGreen() * factor),
+                (int) Math.round(base.getBlue() * factor));
+    }
+
+    /**
+     * Recursively tint a sub-window's content with {@link #subWindowBackground()}
+     * so its panels, toolbars, scroll panes and read-only feeds share one darker
+     * surface. Editable inputs, buttons and other controls keep their own colours.
+     */
+    public void styleSubWindow(Component root) {
+        applyBackground(root, subWindowBackground());
+    }
+
+    private static void applyBackground(Component c, Color bg) {
+        if (shouldTint(c)) {
+            c.setBackground(bg);
+        }
+        if (c instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                applyBackground(child, bg);
+            }
+        }
+    }
+
+    private static boolean shouldTint(Component c) {
+        if (c instanceof JTextComponent text) {
+            // Tint read-only feeds (board/monitor/debug); leave editable inputs alone.
+            return !text.isEditable();
+        }
+        return c instanceof JPanel
+                || c instanceof JToolBar
+                || c instanceof JSplitPane
+                || c instanceof JScrollPane
+                || c instanceof JViewport
+                || c instanceof JList
+                || c instanceof JTree
+                || c instanceof JInternalFrame;
     }
 
     public void toggle() {

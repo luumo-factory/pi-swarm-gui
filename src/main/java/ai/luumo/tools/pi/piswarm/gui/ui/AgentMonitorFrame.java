@@ -2,6 +2,7 @@ package ai.luumo.tools.pi.piswarm.gui.ui;
 
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
+import ai.luumo.tools.pi.piswarm.gui.model.AgentGroup;
 import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
 
 import javax.swing.BorderFactory;
@@ -10,7 +11,6 @@ import javax.swing.JCheckBox;
 import javax.swing.JInternalFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JTextField;
 import javax.swing.JToolBar;
 import javax.swing.event.InternalFrameAdapter;
 import javax.swing.event.InternalFrameEvent;
@@ -32,11 +32,15 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
     private final PiOutputPane output = new PiOutputPane();
     private final PiEventRenderer renderer;
     private final JLabel statusLabel = new JLabel();
+    private final JLabel cwdLabel = new JLabel();
+    private final GroupChooserButton groupButton;
+    private final StatusDot statusDot = new StatusDot();
     private final JButton stopButton = new JButton("Stop");
+    private final HoldButton killButton;
     private final JButton modelButton = new JButton("Model ▾");
     private final JButton renameButton = new JButton("Rename…");
     private final JButton controlsButton = new JButton("Controls…");
-    private final JTextField input = new JTextField();
+    private final MessageInput input = new MessageInput();
     private final JCheckBox urgent = new JCheckBox("urgent");
 
     public AgentMonitorFrame(Agent agent, SwarmModel model, ThemeManager theme, AgentActions actions) {
@@ -46,12 +50,19 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
         this.actions = actions;
         this.agentId = agent.getId();
         this.renderer = new PiEventRenderer(theme, output);
+        this.killButton = new HoldButton("Kill", 1000, this::killAgent);
+        this.killButton.setToolTipText("Hold for 1s to /quit this agent and close the window");
+        this.groupButton = new GroupChooserButton(model.groupOf(agentId),
+                g -> withAgent(a -> actions.setGroup(a, g)));
 
         setFrameIcon(null);
         setSize(560, 420);
         setLayout(new BorderLayout());
 
-        add(buildToolbar(), BorderLayout.NORTH);
+        JPanel top = new JPanel(new BorderLayout());
+        top.add(buildToolbar(), BorderLayout.NORTH);
+        top.add(buildCwdBar(), BorderLayout.SOUTH);
+        add(top, BorderLayout.NORTH);
         add(output, BorderLayout.CENTER);
         add(buildInput(), BorderLayout.SOUTH);
 
@@ -60,6 +71,13 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
 
         model.addListener(this);
         addInternalFrameListener(new InternalFrameAdapter() {
+            @Override
+            public void internalFrameActivated(InternalFrameEvent e) {
+                // Focusing the window (click / select) drops the cursor straight
+                // into the message box.
+                input.focusInput();
+            }
+
             @Override
             public void internalFrameClosed(InternalFrameEvent e) {
                 model.removeListener(AgentMonitorFrame.this);
@@ -85,13 +103,31 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
         renameButton.addActionListener(e -> withAgent(this::promptRename));
         controlsButton.addActionListener(e -> withAgent(actions::openControls));
 
+        bar.add(groupButton);
+        bar.add(javax.swing.Box.createHorizontalStrut(6));
+        statusDot.setPreferredSize(new java.awt.Dimension(14, 14));
+        statusDot.setMaximumSize(new java.awt.Dimension(14, 16));
+        bar.add(statusDot);
+        bar.add(javax.swing.Box.createHorizontalStrut(4));
         bar.add(statusLabel);
         bar.add(javax.swing.Box.createHorizontalGlue());
         bar.add(stopButton);
+        bar.add(killButton);
         bar.add(modelButton);
         bar.add(renameButton);
         bar.add(controlsButton);
         return bar;
+    }
+
+    /** A slim strip under the toolbar showing the agent's working directory. */
+    private JPanel buildCwdBar() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 8, 4, 8));
+        cwdLabel.setFont(cwdLabel.getFont().deriveFont(Font.PLAIN,
+                cwdLabel.getFont().getSize2D() - 1f));
+        cwdLabel.setForeground(java.awt.Color.GRAY);
+        panel.add(cwdLabel, BorderLayout.WEST);
+        return panel;
     }
 
     private JPanel buildInput() {
@@ -100,7 +136,7 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
 
         JButton send = new JButton("Send");
         send.addActionListener(e -> submit());
-        input.addActionListener(e -> submit());
+        input.setOnSubmit(this::submit);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         right.add(urgent);
@@ -167,6 +203,12 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
         }
     }
 
+    /** Shut the agent down (/quit) and close this monitor window. */
+    private void killAgent() {
+        withAgent(actions::quit);
+        dispose();
+    }
+
     private void withAgent(java.util.function.Consumer<Agent> action) {
         Agent agent = model.agent(agentId);
         if (agent != null) {
@@ -184,13 +226,26 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
     private void updateStatus(Agent agent) {
         if (agent == null) {
             statusLabel.setText("offline");
+            statusDot.setColor(StatusDot.colorFor(ai.luumo.tools.pi.piswarm.gui.model.AgentStatus.OFFLINE, theme));
+            statusDot.repaint();
+            cwdLabel.setText(" ");
             stopButton.setEnabled(false);
             return;
         }
+        statusDot.setColor(StatusDot.colorFor(agent.getStatus(), theme));
+        statusDot.repaint();
+        String cwd = agent.getCwd();
+        if (cwd == null || cwd.isBlank()) {
+            cwdLabel.setText("(unknown)");
+        } else {
+            cwdLabel.setText(cwd);
+        }
+        cwdLabel.setToolTipText(cwd);
         statusLabel.setText(" " + agent.getStatus().label() + "  ·  " + agent.modelLabel() + "  ");
         statusLabel.setFont(statusLabel.getFont().deriveFont(Font.PLAIN));
         stopButton.setEnabled(agent.getStatus().isBusy());
         modelButton.setEnabled(true);
+        groupButton.setGroup(model.groupOf(agentId));
     }
 
     // ------------------------------------------------------------------

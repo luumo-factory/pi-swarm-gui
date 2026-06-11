@@ -1,7 +1,9 @@
 package ai.luumo.tools.pi.piswarm.gui.ui;
 
+import javax.swing.BorderFactory;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
+import javax.swing.UIManager;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
@@ -24,6 +26,27 @@ public final class PiOutputPane extends JScrollPane {
         pane.setFont(monospaced());
         setViewportView(pane);
         getVerticalScrollBar().setUnitIncrement(16);
+    }
+
+    /**
+     * Keep only a top/bottom rule on the feed. The hosting messaging windows put
+     * the output box flush against their own left/right edges, so a full box
+     * border would double up with the window border there; a horizontal rule is
+     * enough to separate the feed from the controls above and below it. Re-applied
+     * here (not in the constructor) so it survives look-and-feel/theme changes,
+     * which reinstall the scroll pane's default border via updateUI().
+     */
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        Color line = UIManager.getColor("Component.borderColor");
+        if (line == null) {
+            line = UIManager.getColor("Separator.foreground");
+        }
+        if (line == null) {
+            line = Color.GRAY;
+        }
+        setBorder(BorderFactory.createMatteBorder(1, 0, 1, 0, line));
     }
 
     private static Font monospaced() {

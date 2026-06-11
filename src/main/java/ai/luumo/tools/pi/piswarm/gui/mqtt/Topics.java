@@ -91,9 +91,46 @@ public final class Topics {
         return null;
     }
 
-    /** Shared broadcast board. */
+    /** Shared broadcast board for the default ({@code red}) group. */
     public String board() {
         return ns + "/board";
+    }
+
+    /**
+     * Broadcast board topic for a specific group. The default {@code red} group
+     * keeps the legacy {@code NS/board} topic; every other group uses
+     * {@code NS/board/<group>}.
+     */
+    public String board(String group) {
+        if (group == null || group.isBlank() || "red".equalsIgnoreCase(group.trim())) {
+            return board();
+        }
+        return ns + "/board/" + group.trim().toLowerCase();
+    }
+
+    /** Wildcard covering every non-default group board ({@code NS/board/<group>}). */
+    public String boardSubWildcard() {
+        return ns + "/board/+";
+    }
+
+    /**
+     * Resolve the group id for a board topic: {@code red} for the legacy
+     * {@code NS/board}, the group segment for {@code NS/board/<group>}, or null
+     * when the topic is not a board topic.
+     */
+    public String groupFromBoard(String topic) {
+        if (topic == null) {
+            return null;
+        }
+        if (topic.equals(board())) {
+            return "red";
+        }
+        String prefix = ns + "/board/";
+        if (topic.startsWith(prefix)) {
+            String g = topic.substring(prefix.length());
+            return g.isEmpty() || g.contains("/") ? null : g;
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------

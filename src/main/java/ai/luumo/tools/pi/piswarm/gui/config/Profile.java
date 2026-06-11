@@ -12,7 +12,9 @@ import java.util.List;
  * default agent. {@code agentName} (when set) becomes the spawned agent's
  * {@code --name}; {@code model} is passed to {@code --model} (e.g.
  * {@code anthropic/claude-sonnet-4-5} or a fuzzy query like {@code sonnet});
- * {@code extensions} are extra {@code --extension} specs/paths.</p>
+ * {@code extensions} are extra {@code --extension} specs/paths;
+ * {@code workingDir} is the directory the agent is spawned in (defaults to the
+ * user's home directory when left blank).</p>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public final class Profile {
@@ -20,6 +22,7 @@ public final class Profile {
     private String name = "";
     private String agentName = "";
     private String model = "";
+    private String workingDir = "";
     private List<String> extensions = new ArrayList<>();
 
     public Profile() {
@@ -51,6 +54,25 @@ public final class Profile {
 
     public void setModel(String model) {
         this.model = model == null ? "" : model;
+    }
+
+    public String getWorkingDir() {
+        return workingDir;
+    }
+
+    public void setWorkingDir(String workingDir) {
+        this.workingDir = workingDir == null ? "" : workingDir;
+    }
+
+    /**
+     * The effective working directory for a spawn: the configured
+     * {@link #getWorkingDir() workingDir} when set, otherwise the user's home
+     * directory.
+     */
+    public String resolvedWorkingDir() {
+        return workingDir == null || workingDir.isBlank()
+                ? System.getProperty("user.home", "")
+                : workingDir.trim();
     }
 
     public List<String> getExtensions() {
