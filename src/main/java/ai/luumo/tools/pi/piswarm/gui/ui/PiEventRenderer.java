@@ -31,6 +31,9 @@ public final class PiEventRenderer {
     public void render(AgentEvent event) {
         switch (event.type()) {
             case "agent_start" -> divider("agent thinking…", theme.accent());
+            case "user_input" -> renderUserInput(event);
+            case "rename_ack" -> note("✎ renaming → " + textOf(event.raw(), "newId", "?"), theme.muted());
+            case "rename_result" -> renderRename(event);
             case "turn_end" -> renderTurnEnd(event);
             case "agent_end" -> renderAgentEnd(event);
             case "model_select", "set_model_result" -> renderModel(event);
@@ -48,6 +51,30 @@ public final class PiEventRenderer {
             case "error" -> note("✖ " + textOf(event.raw(), "error", "error"), theme.error());
             default -> note("● " + event.type(), theme.muted());
         }
+    }
+
+    /** Mirror of user input typed directly into the agent's TUI (or via RPC). */
+    private void renderUserInput(AgentEvent event) {
+        String text = event.text();
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        String source = textOf(event.raw(), "source", "interactive");
+        timestamp(event.ts());
+        out.append("❯ ", theme.userMessage(), true);
+        out.append("[" + source + "] ", theme.muted());
+        out.append(text.stripTrailing(), theme.userMessage());
+        out.newline();
+        out.newline();
+    }
+
+    private void renderRename(AgentEvent event) {
+        boolean ok = !event.raw().has("ok") || event.raw().get("ok").asBoolean();
+        if (!ok) {
+            note("✖ rename: " + textOf(event.raw(), "error", "failed"), theme.error());
+            return;
+        }
+        note("✎ renamed → " + textOf(event.raw(), "name", "?"), theme.accent());
     }
 
     private void renderTurnEnd(AgentEvent event) {

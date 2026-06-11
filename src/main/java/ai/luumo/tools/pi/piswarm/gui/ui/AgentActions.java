@@ -1,6 +1,7 @@
 package ai.luumo.tools.pi.piswarm.gui.ui;
 
 import ai.luumo.tools.pi.piswarm.gui.config.ModelRef;
+import ai.luumo.tools.pi.piswarm.gui.config.Profile;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 
 import java.util.List;
@@ -46,4 +47,19 @@ public interface AgentActions {
 
     /** Request a fresh status snapshot on the agent's control/out. */
     void requestStatus(Agent agent);
+
+    /** Rename the agent (display name) over the control plane. */
+    void rename(Agent agent, String newName);
+
+    /** Launch profiles available for spawning a new agent (for the dropdown). */
+    List<Profile> launchProfiles();
+
+    /**
+     * Launch a new agent from the given profile ({@code null} = defaults),
+     * selecting the target console/host (prompting when several are running).
+     */
+    void launchAgent(Profile profile);
+
+    /** Open the profile manager window. */
+    void openProfileManager();
 }

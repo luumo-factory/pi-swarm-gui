@@ -12,7 +12,8 @@
   "ui": {
     "theme": "dark",
     "eventBufferSize": 500,
-    "boardHistorySize": 500
+    "boardHistorySize": 500,
+    "debugBufferSize": 500
   },
   "orchestrator": {
     "id": "gui",

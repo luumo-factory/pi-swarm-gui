@@ -4,7 +4,10 @@ import ai.luumo.tools.pi.piswarm.gui.config.AppConfig;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
 import ai.luumo.tools.pi.piswarm.gui.model.BoardPost;
+import ai.luumo.tools.pi.piswarm.gui.model.ConsoleInfo;
+import ai.luumo.tools.pi.piswarm.gui.model.RawMessage;
 import ai.luumo.tools.pi.piswarm.gui.mqtt.SwarmListener;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import javax.swing.SwingUtilities;
 import java.util.ArrayDeque;
@@ -28,8 +31,11 @@ public final class SwarmModel implements SwarmListener {
 
     // All mutable state below is touched only on the EDT.
     private final Map<String, Agent> agents = new LinkedHashMap<>();
+    private final Map<String, ConsoleInfo> consoles = new LinkedHashMap<>();
     private final Map<String, Deque<AgentEvent>> events = new LinkedHashMap<>();
     private final Deque<BoardPost> board = new ArrayDeque<>();
+    // Raw MQTT frames retained per topic for the debug view (insertion-ordered).
+    private final Map<String, Deque<RawMessage>> rawByTopic = new LinkedHashMap<>();
     private final List<SwarmModelListener> listeners = new CopyOnWriteArrayList<>();
 
     private boolean connected;
@@ -50,15 +56,32 @@ public final class SwarmModel implements SwarmListener {
         return connected;
     }
 
-    /** Snapshot of agents sorted by name; call on the EDT. */
+    /**
+     * Agents to display, on the EDT. Excludes agents we've never received a real
+     * status update for (stale/retained topics), and sorts live agents first
+     * (by name) with offline agents pushed to the bottom.
+     */
     public List<Agent> agentsSorted() {
-        List<Agent> list = new ArrayList<>(agents.values());
-        list.sort(Comparator.comparing(Agent::getName, String.CASE_INSENSITIVE_ORDER));
+        List<Agent> list = new ArrayList<>();
+        for (Agent a : agents.values()) {
+            if (a.isStatusKnown()) {
+                list.add(a);
+            }
+        }
+        list.sort(Comparator.comparing((Agent a) -> !a.getStatus().isLive())
+                .thenComparing(Agent::getName, String.CASE_INSENSITIVE_ORDER));
         return list;
     }
 
     public Agent agent(String id) {
         return agents.get(id);
+    }
+
+    /** Snapshot of known consoles (spawn hosts) sorted by name; call on the EDT. */
+    public List<ConsoleInfo> consolesSorted() {
+        List<ConsoleInfo> list = new ArrayList<>(consoles.values());
+        list.sort(Comparator.comparing(ConsoleInfo::name, String.CASE_INSENSITIVE_ORDER));
+        return list;
     }
 
     /** Recent events for an agent (oldest first); call on the EDT. */
@@ -70,6 +93,17 @@ public final class SwarmModel implements SwarmListener {
     /** Recent board posts (oldest first); call on the EDT. */
     public List<BoardPost> boardPosts() {
         return new ArrayList<>(board);
+    }
+
+    /** Snapshot of every topic seen so far (insertion order); call on the EDT. */
+    public List<String> rawTopics() {
+        return new ArrayList<>(rawByTopic.keySet());
+    }
+
+    /** Recent raw messages for a topic (oldest first); call on the EDT. */
+    public List<RawMessage> rawMessagesFor(String topic) {
+        Deque<RawMessage> q = rawByTopic.get(topic);
+        return q == null ? List.of() : new ArrayList<>(q);
     }
 
     // ------------------------------------------------------------------
@@ -102,6 +136,37 @@ public final class SwarmModel implements SwarmListener {
     }
 
     @Override
+    public void onAgentRemoved(String agentId) {
+        edt(() -> {
+            if (agents.remove(agentId) != null) {
+                listeners.forEach(l -> l.agentsChanged());
+            }
+        });
+    }
+
+    @Override
+    public void onConsoleUpdated(ConsoleInfo console) {
+        edt(() -> {
+            consoles.put(console.id(), console);
+            listeners.forEach(l -> l.consolesChanged());
+        });
+    }
+
+    @Override
+    public void onConsoleRemoved(String consoleId) {
+        edt(() -> {
+            if (consoles.remove(consoleId) != null) {
+                listeners.forEach(l -> l.consolesChanged());
+            }
+        });
+    }
+
+    @Override
+    public void onConsoleReply(JsonNode reply) {
+        edt(() -> listeners.forEach(l -> l.consoleReply(reply)));
+    }
+
+    @Override
     public void onAgentEvent(AgentEvent event) {
         recordEvent(event);
     }
@@ -122,6 +187,19 @@ public final class SwarmModel implements SwarmListener {
                 q.removeFirst();
             }
             listeners.forEach(l -> l.agentEvent(event));
+        });
+    }
+
+    @Override
+    public void onRawMessage(RawMessage message) {
+        edt(() -> {
+            Deque<RawMessage> q = rawByTopic.computeIfAbsent(message.topic(), k -> new ArrayDeque<>());
+            q.addLast(message);
+            int cap = config.getUi().getDebugBufferSize();
+            while (q.size() > cap) {
+                q.removeFirst();
+            }
+            listeners.forEach(l -> l.rawMessage(message));
         });
     }
 
@@ -160,6 +238,15 @@ public final class SwarmModel implements SwarmListener {
         }
 
         default void boardPost(BoardPost post) {
+        }
+
+        default void rawMessage(RawMessage message) {
+        }
+
+        default void consolesChanged() {
+        }
+
+        default void consoleReply(JsonNode reply) {
         }
     }
 

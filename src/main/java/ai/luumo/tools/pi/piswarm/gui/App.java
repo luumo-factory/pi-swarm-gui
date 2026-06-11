@@ -2,6 +2,8 @@ package ai.luumo.tools.pi.piswarm.gui;
 
 import ai.luumo.tools.pi.piswarm.gui.config.AppConfig;
 import ai.luumo.tools.pi.piswarm.gui.config.ConfigLoader;
+import ai.luumo.tools.pi.piswarm.gui.config.ProfilesConfig;
+import ai.luumo.tools.pi.piswarm.gui.config.SessionConfig;
 import ai.luumo.tools.pi.piswarm.gui.mqtt.SwarmClient;
 import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
 import ai.luumo.tools.pi.piswarm.gui.ui.MainFrame;
@@ -22,6 +24,7 @@ public final class App {
     public static void main(String[] args) {
         String configArg = args.length > 0 ? args[0] : null;
         Path configPath = ConfigLoader.resolvePath(configArg);
+        Path sessionPath = ConfigLoader.sessionPath(configPath);
 
         AppConfig config;
         try {
@@ -31,6 +34,9 @@ public final class App {
             config = new AppConfig();
         }
         final AppConfig cfg = config;
+        final SessionConfig session = ConfigLoader.loadSession(sessionPath);
+        Path profilesPath = ConfigLoader.profilesPath(configPath);
+        final ProfilesConfig profiles = ConfigLoader.loadProfiles(profilesPath);
 
         ThemeManager theme = new ThemeManager();
         theme.apply(ThemeManager.Theme.from(cfg.getUi().getTheme()));
@@ -40,7 +46,8 @@ public final class App {
         client.addListener(model);
 
         SwingUtilities.invokeLater(() -> {
-            MainFrame frame = new MainFrame(cfg, model, client, theme);
+            MainFrame frame = new MainFrame(cfg, model, client, theme, session, profiles,
+                    configPath, sessionPath, profilesPath);
             frame.setVisible(true);
 
             // Connect off the EDT so a slow/missing broker doesn't freeze the UI.

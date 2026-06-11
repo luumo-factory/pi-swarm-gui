@@ -1,12 +1,14 @@
 package ai.luumo.tools.pi.piswarm.gui.ui;
 
 import ai.luumo.tools.pi.piswarm.gui.config.ModelRef;
+import ai.luumo.tools.pi.piswarm.gui.config.Profile;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentStatus;
 import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -54,11 +56,44 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         list.setCellRenderer(new AgentCell());
         list.setFixedCellHeight(46);
         add(new JScrollPane(list), BorderLayout.CENTER);
+        add(buildLaunchBar(), BorderLayout.SOUTH);
 
         installMouse();
 
         model.addListener(this);
         refresh();
+    }
+
+    private JComponent buildLaunchBar() {
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.setBorder(BorderFactory.createEmptyBorder(6, 8, 8, 8));
+        JButton launch = new JButton("＋ Launch agent ▾");
+        launch.setToolTipText("Spawn a new agent on a running console host");
+        launch.addActionListener(e -> showLaunchMenu(launch));
+        bar.add(launch, BorderLayout.CENTER);
+        return bar;
+    }
+
+    private void showLaunchMenu(JComponent anchor) {
+        JPopupMenu menu = new JPopupMenu();
+
+        JMenuItem defaults = new JMenuItem("<defaults>");
+        defaults.addActionListener(ev -> actions.launchAgent(null));
+        menu.add(defaults);
+
+        for (Profile p : actions.launchProfiles()) {
+            JMenuItem item = new JMenuItem(p.getName() == null || p.getName().isBlank()
+                    ? "(unnamed profile)" : p.getName());
+            item.addActionListener(ev -> actions.launchAgent(p));
+            menu.add(item);
+        }
+
+        menu.addSeparator();
+        JMenuItem manage = new JMenuItem("Manage profiles…");
+        manage.addActionListener(ev -> actions.openProfileManager());
+        menu.add(manage);
+
+        menu.show(anchor, 0, -((int) menu.getPreferredSize().getHeight()));
     }
 
     private void installMouse() {
@@ -109,6 +144,10 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         controls.addActionListener(ev -> actions.openControls(agent));
         menu.add(controls);
 
+        JMenuItem rename = new JMenuItem("Rename…");
+        rename.addActionListener(ev -> promptRename(agent));
+        menu.add(rename);
+
         JMenuItem stop = new JMenuItem("Stop current turn");
         stop.setEnabled(agent.getStatus().isBusy());
         stop.addActionListener(ev -> actions.stop(agent));
@@ -142,6 +181,18 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         menu.add(reset);
 
         menu.show(e.getComponent(), e.getX(), e.getY());
+    }
+
+    private void promptRename(Agent agent) {
+        String current = agent.getName();
+        Object input = javax.swing.JOptionPane.showInputDialog(this, "New name for this agent:",
+                "Rename agent", javax.swing.JOptionPane.PLAIN_MESSAGE, null, null, current);
+        if (input != null) {
+            String name = input.toString().trim();
+            if (!name.isEmpty() && !name.equals(current)) {
+                actions.rename(agent, name);
+            }
+        }
     }
 
     private void refresh() {

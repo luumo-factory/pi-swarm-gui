@@ -5,8 +5,11 @@ import ai.luumo.tools.pi.piswarm.gui.config.ModelRef;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentStatus;
+import ai.luumo.tools.pi.piswarm.gui.config.Profile;
 import ai.luumo.tools.pi.piswarm.gui.model.BoardPost;
+import ai.luumo.tools.pi.piswarm.gui.model.ConsoleInfo;
 import ai.luumo.tools.pi.piswarm.gui.model.ExtensionInfo;
+import ai.luumo.tools.pi.piswarm.gui.model.RawMessage;
 import ai.luumo.tools.pi.piswarm.gui.model.ToolSummary;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -100,6 +103,11 @@ public final class SwarmClient implements MqttCallbackExtended {
         client.subscribe(topics.agentOutWildcard(), 1);
         client.subscribe(topics.agentControlOutWildcard(), 1);
         client.subscribe(topics.board(), 1);
+        // Console (spawn host) plane. console/in is subscribed too so the debug
+        // view mirrors the spawn requests this GUI publishes.
+        client.subscribe(topics.consoleRegistryWildcard(), 1);
+        client.subscribe(topics.consoleOut(), 1);
+        client.subscribe(topics.consoleIn(), 1);
     }
 
     // ------------------------------------------------------------------
@@ -177,6 +185,52 @@ public final class SwarmClient implements MqttCallbackExtended {
         publish(topics.agentControlIn(agentId), node, false);
     }
 
+    /**
+     * Rename an agent over the control plane. {@code reslug=false} changes only
+     * the display name and keeps the agent's id/topics stable (so open monitors
+     * keep working); {@code reslug=true} also moves the agent's topics.
+     */
+    public void renameAgent(String agentId, String newName, boolean reslug) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("action", "rename");
+        node.put("name", newName);
+        node.put("reslug", reslug);
+        publish(topics.agentControlIn(agentId), node, false);
+    }
+
+    /**
+     * Ask a specific console to spawn a new headless agent. The {@code console}
+     * field targets the chosen host so only it acts when several are running.
+     */
+    public void spawnAgent(String consoleId, Profile profile) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("action", "spawn");
+        if (consoleId != null && !consoleId.isBlank()) {
+            node.put("console", consoleId);
+        }
+        node.put("reqId", "gui-" + Long.toHexString(System.nanoTime()));
+        if (profile != null) {
+            if (profile.getAgentName() != null && !profile.getAgentName().isBlank()) {
+                node.put("name", profile.getAgentName().trim());
+            }
+            if (profile.getModel() != null && !profile.getModel().isBlank()) {
+                node.put("model", profile.getModel().trim());
+            }
+            List<String> exts = new ArrayList<>();
+            if (profile.getExtensions() != null) {
+                for (String e : profile.getExtensions()) {
+                    if (e != null && !e.isBlank()) {
+                        exts.add(e.trim());
+                    }
+                }
+            }
+            if (!exts.isEmpty()) {
+                node.set("extensions", mapper.valueToTree(exts));
+            }
+        }
+        publish(topics.consoleIn(), node, false);
+    }
+
     public void pingAgent(String agentId) {
         ObjectNode node = mapper.createObjectNode();
         node.put("action", "ping");
@@ -229,6 +283,10 @@ public final class SwarmClient implements MqttCallbackExtended {
     public void messageArrived(String topic, MqttMessage message) {
         String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
 
+        // Surface the raw frame to the debug view before any protocol parsing.
+        RawMessage raw = RawMessage.of(topic, message.getPayload(), message.getQos(), message.isRetained());
+        listeners.forEach(l -> l.onRawMessage(raw));
+
         String registryId = topics.agentIdFromRegistry(topic);
         if (registryId != null) {
             handleRegistry(registryId, payload);
@@ -242,6 +300,15 @@ public final class SwarmClient implements MqttCallbackExtended {
         String outId = topics.agentIdFromOut(topic);
         if (outId != null) {
             handleOut(outId, payload);
+            return;
+        }
+        String consoleId = topics.consoleIdFromRegistry(topic);
+        if (consoleId != null) {
+            handleConsoleRegistry(consoleId, payload);
+            return;
+        }
+        if (topic.equals(topics.consoleOut())) {
+            handleConsoleOut(payload);
             return;
         }
         if (topic.equals(topics.board())) {
@@ -260,13 +327,19 @@ public final class SwarmClient implements MqttCallbackExtended {
 
     private void handleRegistry(String id, String payload) {
         if (payload == null || payload.isBlank()) {
-            return; // retained tombstone clear
+            // Retained tombstone clear: the agent deregistered, so drop it.
+            listeners.forEach(l -> l.onAgentRemoved(id));
+            return;
         }
         try {
             JsonNode n = mapper.readTree(payload);
             Agent agent = new Agent(id);
             agent.setName(text(n, "name", id));
-            agent.setStatus(AgentStatus.from(text(n, "status", null)));
+            AgentStatus status = AgentStatus.from(text(n, "status", null));
+            agent.setStatus(status);
+            // Only count it as a real status update when the payload actually carried
+            // a recognized status; stale/partial registry topics stay hidden.
+            agent.setStatusKnown(n.hasNonNull("status") && status != AgentStatus.UNKNOWN);
             agent.setModel(parseModel(n.get("model")));
             agent.setAvailableModels(parseModels(n.get("availableModels")));
             agent.setExtensions(parseExtensions(n.get("extensions")));
@@ -306,6 +379,44 @@ public final class SwarmClient implements MqttCallbackExtended {
             listeners.forEach(l -> l.onControlReply(event));
         } catch (Exception e) {
             System.err.println("bad control/out payload for " + id + ": " + e.getMessage());
+        }
+    }
+
+    private void handleConsoleRegistry(String id, String payload) {
+        if (payload == null || payload.isBlank()) {
+            listeners.forEach(l -> l.onConsoleRemoved(id));
+            return;
+        }
+        try {
+            JsonNode n = mapper.readTree(payload);
+            String status = text(n, "status", null);
+            if ("offline".equalsIgnoreCase(status)) {
+                // Last-will / explicit offline: drop the console.
+                listeners.forEach(l -> l.onConsoleRemoved(id));
+                return;
+            }
+            JsonNode agents = n.get("agents");
+            int agentCount = agents != null && agents.isArray() ? agents.size() : 0;
+            ConsoleInfo console = new ConsoleInfo(
+                    text(n, "id", id),
+                    text(n, "name", id),
+                    text(n, "host", null),
+                    n.hasNonNull("pid") ? n.get("pid").asInt() : -1,
+                    agentCount,
+                    true,
+                    n.hasNonNull("ts") ? n.get("ts").asLong() : System.currentTimeMillis());
+            listeners.forEach(l -> l.onConsoleUpdated(console));
+        } catch (Exception e) {
+            System.err.println("bad console registry payload for " + id + ": " + e.getMessage());
+        }
+    }
+
+    private void handleConsoleOut(String payload) {
+        try {
+            JsonNode n = mapper.readTree(payload);
+            listeners.forEach(l -> l.onConsoleReply(n));
+        } catch (Exception e) {
+            System.err.println("bad console/out payload: " + e.getMessage());
         }
     }
 

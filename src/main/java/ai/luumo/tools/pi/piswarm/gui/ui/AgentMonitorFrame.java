@@ -34,6 +34,7 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
     private final JLabel statusLabel = new JLabel();
     private final JButton stopButton = new JButton("Stop");
     private final JButton modelButton = new JButton("Model ▾");
+    private final JButton renameButton = new JButton("Rename…");
     private final JButton controlsButton = new JButton("Controls…");
     private final JTextField input = new JTextField();
     private final JCheckBox urgent = new JCheckBox("urgent");
@@ -81,12 +82,14 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
 
         stopButton.addActionListener(e -> withAgent(actions::stop));
         modelButton.addActionListener(e -> withAgent(this::showModelMenu));
+        renameButton.addActionListener(e -> withAgent(this::promptRename));
         controlsButton.addActionListener(e -> withAgent(actions::openControls));
 
         bar.add(statusLabel);
         bar.add(javax.swing.Box.createHorizontalGlue());
         bar.add(stopButton);
         bar.add(modelButton);
+        bar.add(renameButton);
         bar.add(controlsButton);
         return bar;
     }
@@ -140,16 +143,28 @@ public final class AgentMonitorFrame extends JInternalFrame implements SwarmMode
             menu.add(none);
         } else {
             for (ai.luumo.tools.pi.piswarm.gui.config.ModelRef m : models) {
-                javax.swing.JMenuItem item = new javax.swing.JMenuItem(m.displayLabel());
+                javax.swing.JMenuItem item = new javax.swing.JMenuItem(m.displayLabelWithProvider());
                 if (m.equals(agent.getModel())) {
                     item.setFont(item.getFont().deriveFont(Font.BOLD));
-                    item.setText("● " + m.displayLabel());
+                    item.setText("● " + m.displayLabelWithProvider());
                 }
                 item.addActionListener(ev -> withAgent(a -> actions.setModel(a, m)));
                 menu.add(item);
             }
         }
         menu.show(modelButton, 0, modelButton.getHeight());
+    }
+
+    private void promptRename(Agent agent) {
+        String current = agent.getName();
+        Object input = javax.swing.JOptionPane.showInputDialog(this, "New name for this agent:",
+                "Rename agent", javax.swing.JOptionPane.PLAIN_MESSAGE, null, null, current);
+        if (input != null) {
+            String name = input.toString().trim();
+            if (!name.isEmpty() && !name.equals(current)) {
+                actions.rename(agent, name);
+            }
+        }
     }
 
     private void withAgent(java.util.function.Consumer<Agent> action) {

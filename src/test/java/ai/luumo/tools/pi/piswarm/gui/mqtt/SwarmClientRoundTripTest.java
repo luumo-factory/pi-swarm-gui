@@ -1,10 +1,16 @@
 package ai.luumo.tools.pi.piswarm.gui.mqtt;
 
 import ai.luumo.tools.pi.piswarm.gui.config.AppConfig;
+import ai.luumo.tools.pi.piswarm.gui.config.Profile;
 import ai.luumo.tools.pi.piswarm.gui.model.Agent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentEvent;
 import ai.luumo.tools.pi.piswarm.gui.model.AgentStatus;
 import ai.luumo.tools.pi.piswarm.gui.model.BoardPost;
+import ai.luumo.tools.pi.piswarm.gui.model.ConsoleInfo;
+import ai.luumo.tools.pi.piswarm.gui.model.RawMessage;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -116,6 +122,75 @@ class SwarmClientRoundTripTest {
         assertEquals("coder-1", e.agentId());
         assertEquals("set_model_result", e.type());
         assertTrue(e.raw().get("ok").asBoolean());
+
+        client.disconnect();
+    }
+
+    @Test
+    void receivesConsoleRegistration() throws Exception {
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        SwarmClient client = new SwarmClient(config());
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<ConsoleInfo> received = new AtomicReference<>();
+        client.addListener(new SwarmListener() {
+            @Override
+            public void onConsoleUpdated(ConsoleInfo console) {
+                received.set(console);
+                latch.countDown();
+            }
+        });
+        client.connect();
+        TimeUnit.MILLISECONDS.sleep(300);
+
+        publish("swarm-test/console/registry/host-1",
+                "{\"type\":\"console\",\"id\":\"host-1\",\"name\":\"Host One\",\"host\":\"mybox\","
+                        + "\"pid\":4242,\"agents\":[{\"id\":\"a\"},{\"id\":\"b\"}],\"ts\":7}",
+                true);
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "console registration not received");
+        ConsoleInfo c = received.get();
+        assertEquals("host-1", c.id());
+        assertEquals("Host One", c.name());
+        assertEquals("mybox", c.host());
+        assertEquals(2, c.agentCount());
+
+        client.disconnect();
+        clearRetained("swarm-test/console/registry/host-1");
+    }
+
+    @Test
+    void spawnPublishesTargetedRequest() throws Exception {
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        SwarmClient client = new SwarmClient(config());
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<RawMessage> received = new AtomicReference<>();
+        client.addListener(new SwarmListener() {
+            @Override
+            public void onRawMessage(RawMessage message) {
+                if (message.topic().equals("swarm-test/console/in")) {
+                    received.set(message);
+                    latch.countDown();
+                }
+            }
+        });
+        client.connect();
+        TimeUnit.MILLISECONDS.sleep(300);
+
+        Profile p = new Profile("Reviewer");
+        p.setAgentName("reviewer");
+        p.setModel("sonnet");
+        p.setExtensions(List.of("./review-ext.ts"));
+        client.spawnAgent("host-1", p);
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "spawn request not observed");
+        JsonNode n = new ObjectMapper().readTree(received.get().payload());
+        assertEquals("spawn", n.get("action").asText());
+        assertEquals("host-1", n.get("console").asText());
+        assertEquals("reviewer", n.get("name").asText());
+        assertEquals("sonnet", n.get("model").asText());
+        assertEquals("./review-ext.ts", n.get("extensions").get(0).asText());
 
         client.disconnect();
     }

@@ -23,6 +23,7 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -77,6 +78,17 @@ public final class AgentControlDialog extends JDialog implements SwarmModel.Swar
             Agent agent = model.agent(agentId);
             if (sel != null && agent != null && !sel.equals(agent.getModel())) {
                 actions.setModel(agent, sel);
+            }
+        });
+        modelCombo.setRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override
+            public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
+                    int index, boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof ModelRef m) {
+                    setText(m.displayLabelWithProvider());
+                }
+                return this;
             }
         });
         modelRow.add(modelCombo, BorderLayout.CENTER);
@@ -145,7 +157,9 @@ public final class AgentControlDialog extends JDialog implements SwarmModel.Swar
             statusLabel.setText(agent.getName() + "  ·  " + agent.getStatus().label());
 
             DefaultComboBoxModel<ModelRef> models = new DefaultComboBoxModel<>();
-            for (ModelRef m : agent.getAvailableModels()) {
+            List<ModelRef> sorted = new ArrayList<>(agent.getAvailableModels());
+            sorted.sort(ModelRef.BY_PROVIDER_THEN_MODEL);
+            for (ModelRef m : sorted) {
                 models.addElement(m);
             }
             modelCombo.setModel(models);

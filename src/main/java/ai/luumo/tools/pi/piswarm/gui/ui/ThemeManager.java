@@ -7,6 +7,7 @@ import com.formdev.flatlaf.FlatLightLaf;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.Color;
+import java.awt.Insets;
 import java.awt.Window;
 
 /**
@@ -38,6 +39,15 @@ public final class ThemeManager {
         this.theme = newTheme;
         FlatLaf laf = newTheme == Theme.DARK ? new FlatDarkLaf() : new FlatLightLaf();
         FlatLaf.setup(laf);
+
+        // FlatLaf reserves a margin around each internal frame to paint a drop
+        // shadow (InternalFrame.borderMargins / dropShadowPainted). That margin
+        // makes snapped frames look like they have a gap even though their bounds
+        // are flush, so drop the shadow and zero the margin. FlatLaf.setup() resets
+        // UIManager defaults, so re-apply after every theme change.
+        UIManager.put("InternalFrame.dropShadowPainted", Boolean.FALSE);
+        UIManager.put("InternalFrame.borderMargins", new Insets(0, 0, 0, 0));
+
         for (Window w : Window.getWindows()) {
             SwingUtilities.updateComponentTreeUI(w);
         }

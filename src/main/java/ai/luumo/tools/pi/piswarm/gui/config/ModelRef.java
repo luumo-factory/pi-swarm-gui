@@ -2,6 +2,7 @@ package ai.luumo.tools.pi.piswarm.gui.config;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import java.util.Comparator;
 import java.util.Objects;
 
 /**
@@ -48,6 +49,12 @@ public final class ModelRef {
         this.name = name;
     }
 
+    /** Sort order for model pickers: by provider, then by model label. */
+    public static final Comparator<ModelRef> BY_PROVIDER_THEN_MODEL =
+            Comparator.comparing((ModelRef m) -> m.provider == null ? "" : m.provider,
+                            String.CASE_INSENSITIVE_ORDER)
+                    .thenComparing(ModelRef::displayLabel, String.CASE_INSENSITIVE_ORDER);
+
     /** Best label for display: name, else id, else provider/id. */
     public String displayLabel() {
         if (name != null && !name.isBlank()) {
@@ -57,6 +64,15 @@ public final class ModelRef {
             return id;
         }
         return provider == null ? "unknown" : provider;
+    }
+
+    /** Display label prefixed with the provider, e.g. {@code "anthropic / Sonnet"}. */
+    public String displayLabelWithProvider() {
+        String label = displayLabel();
+        if (provider != null && !provider.isBlank() && !provider.equals(label)) {
+            return provider + " / " + label;
+        }
+        return label;
     }
 
     @Override

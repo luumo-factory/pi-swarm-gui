@@ -42,6 +42,16 @@ class TopicsTest {
     }
 
     @Test
+    void buildsConsoleTopics() {
+        assertEquals("swarm/console/in", topics.consoleIn());
+        assertEquals("swarm/console/out", topics.consoleOut());
+        assertEquals("swarm/console/registry/+", topics.consoleRegistryWildcard());
+        assertEquals("swarm/console/registry/host-1", topics.consoleRegistry("host-1"));
+        assertEquals("host-1", topics.consoleIdFromRegistry("swarm/console/registry/host-1"));
+        assertNull(topics.consoleIdFromRegistry("swarm/console/out"));
+    }
+
+    @Test
     void defaultsNamespaceWhenBlank() {
         Topics t = new Topics(" ");
         assertEquals("swarm/board", t.board());

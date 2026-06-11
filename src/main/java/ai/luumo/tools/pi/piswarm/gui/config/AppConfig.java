@@ -156,6 +156,8 @@ public final class AppConfig {
         private int eventBufferSize = 500;
         /** Max board posts retained. */
         private int boardHistorySize = 500;
+        /** Max raw MQTT messages retained per topic for the debug view. */
+        private int debugBufferSize = 500;
 
         public String getTheme() {
             return theme;
@@ -179,6 +181,14 @@ public final class AppConfig {
 
         public void setBoardHistorySize(int boardHistorySize) {
             this.boardHistorySize = boardHistorySize;
+        }
+
+        public int getDebugBufferSize() {
+            return debugBufferSize;
+        }
+
+        public void setDebugBufferSize(int debugBufferSize) {
+            this.debugBufferSize = debugBufferSize;
         }
     }
 

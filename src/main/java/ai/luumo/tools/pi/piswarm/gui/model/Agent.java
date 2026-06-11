@@ -13,6 +13,8 @@ public final class Agent {
     private final String id;
     private String name;
     private AgentStatus status = AgentStatus.UNKNOWN;
+    /** True once a registry payload carrying a recognized status has been seen. */
+    private boolean statusKnown;
     private ModelRef model;
     private List<ModelRef> availableModels = new ArrayList<>();
     private List<ExtensionInfo> extensions = new ArrayList<>();
@@ -44,6 +46,18 @@ public final class Agent {
 
     public void setStatus(AgentStatus status) {
         this.status = status;
+    }
+
+    /**
+     * Whether we have actually received a status update for this agent (as opposed
+     * to merely seeing a stale/retained or status-less registry topic).
+     */
+    public boolean isStatusKnown() {
+        return statusKnown;
+    }
+
+    public void setStatusKnown(boolean statusKnown) {
+        this.statusKnown = statusKnown;
     }
 
     public ModelRef getModel() {

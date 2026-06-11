@@ -95,4 +95,33 @@ public final class Topics {
     public String board() {
         return ns + "/board";
     }
+
+    // ------------------------------------------------------------------
+    // Console (spawn host) plane
+    // ------------------------------------------------------------------
+
+    /** Inbound console command channel (spawn/list/kill/ping), shared by all consoles. */
+    public String consoleIn() {
+        return ns + "/console/in";
+    }
+
+    /** Outbound console replies + events. */
+    public String consoleOut() {
+        return ns + "/console/out";
+    }
+
+    /** Retained console presence (with host + live agent list) + last-will. */
+    public String consoleRegistryWildcard() {
+        return ns + "/console/registry/+";
+    }
+
+    public String consoleRegistry(String id) {
+        return ns + "/console/registry/" + id;
+    }
+
+    /** Extract the console id from a console registry topic, or null if it doesn't match. */
+    public String consoleIdFromRegistry(String topic) {
+        String prefix = ns + "/console/registry/";
+        return topic.startsWith(prefix) ? topic.substring(prefix.length()) : null;
+    }
 }
