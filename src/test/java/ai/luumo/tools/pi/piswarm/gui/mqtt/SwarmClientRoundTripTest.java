@@ -8,6 +8,7 @@ import ai.luumo.tools.pi.piswarm.gui.model.AgentStatus;
 import ai.luumo.tools.pi.piswarm.gui.model.BoardPost;
 import ai.luumo.tools.pi.piswarm.gui.model.ConsoleInfo;
 import ai.luumo.tools.pi.piswarm.gui.model.RawMessage;
+import ai.luumo.tools.pi.piswarm.gui.swarm.SwarmModel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -125,6 +126,45 @@ class SwarmClientRoundTripTest {
         assertTrue(e.raw().get("ok").asBoolean());
 
         client.disconnect();
+    }
+
+    @Test
+    void modelReceivesMessagesAfterConnectWithRetry() throws Exception {
+        // Full GUI chain: client -> SwarmModel -> EDT listener. Guards against the
+        // connectComplete->subscribe deadlock that left the UI empty: subscribing
+        // must not block Paho's callback thread, so messages must reach the model.
+        assumeTrue(brokerUp(), "no MQTT broker on 127.0.0.1:1883");
+
+        SwarmModel model = new SwarmModel(config());
+        SwarmClient client = new SwarmClient(config());
+        client.addListener(model);
+
+        CountDownLatch connected = new CountDownLatch(1);
+        CountDownLatch gotAgent = new CountDownLatch(1);
+        model.addListener(new SwarmModel.SwarmModelListener() {
+            @Override
+            public void connectionChanged(boolean isConnected) {
+                if (isConnected) {
+                    connected.countDown();
+                }
+            }
+
+            @Override
+            public void agentsChanged() {
+                gotAgent.countDown();
+            }
+        });
+
+        client.connectWithRetry();
+        assertTrue(connected.await(5, TimeUnit.SECONDS), "model never saw the connection");
+        // Publish after the connection so it isn't a retained late-join.
+        TimeUnit.MILLISECONDS.sleep(300);
+        publish("swarm-test/registry/chain-1",
+                "{\"id\":\"chain-1\",\"name\":\"Chain\",\"status\":\"idle\",\"ts\":1}", true);
+
+        assertTrue(gotAgent.await(5, TimeUnit.SECONDS), "model never received the agent (subscribe deadlock?)");
+        client.disconnect();
+        clearRetained("swarm-test/registry/chain-1");
     }
 
     @Test

@@ -323,12 +323,23 @@ public final class SwarmClient implements MqttCallbackExtended {
     public void connectComplete(boolean reconnect, String serverUri) {
         System.err.println("[swarm] " + (reconnect ? "reconnected" : "connected") + " to " + serverUri
                 + " (ns " + topics.namespace() + ")");
+        // Notify listeners straight away so the UI reflects the connection.
+        listeners.forEach(SwarmListener::onConnected);
+        // Subscribe on a separate thread: calling the blocking subscribe() from
+        // within Paho's connectComplete callback runs on the same thread that
+        // delivers SUBACKs and messageArrived, so it can deadlock that thread
+        // (no subscriptions complete, no messages ever delivered).
+        Thread t = new Thread(this::subscribeAllSafely, "mqtt-subscribe");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void subscribeAllSafely() {
         try {
             subscribeAll();
-        } catch (MqttException e) {
+        } catch (Exception e) {
             System.err.println("[swarm] subscribe failed: " + e.getMessage());
         }
-        listeners.forEach(SwarmListener::onConnected);
     }
 
     @Override
