@@ -19,6 +19,8 @@ public final class ConfigLoader {
     public static final String APP_CONFIG_FILE = "app-config.json";
     public static final String SESSION_CONFIG_FILE = "session-config.json";
     public static final String PROFILES_CONFIG_FILE = "profiles-config.json";
+    /** Pre-rename app-config filename, migrated forward if found. */
+    public static final String LEGACY_CONFIG_FILE = "config.json";
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
@@ -65,6 +67,16 @@ public final class ConfigLoader {
     public static AppConfig loadOrCreate(Path path) throws IOException {
         if (Files.exists(path)) {
             return MAPPER.readValue(path.toFile(), AppConfig.class);
+        }
+        // Backward compatibility: the default file used to be "config.json". If a
+        // legacy file sits beside the new app-config.json, adopt it (preserving the
+        // user's real broker settings) and migrate it forward instead of writing
+        // fresh localhost defaults that would never connect.
+        Path legacy = sibling(path, LEGACY_CONFIG_FILE);
+        if (legacy != null && !legacy.equals(path) && Files.exists(legacy)) {
+            AppConfig migrated = MAPPER.readValue(legacy.toFile(), AppConfig.class);
+            save(path, migrated);
+            return migrated;
         }
         AppConfig defaults = new AppConfig();
         save(path, defaults);

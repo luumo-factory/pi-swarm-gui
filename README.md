@@ -39,7 +39,9 @@ and a dedicated control plane (`control/in` / `control/out`). See
 On first run a config file is created at
 `~/.config/pi-swarm-gui/app-config.json` (override with the first CLI argument or
 `PISWARM_GUI_CONFIG`; a directory may be given, in which case `app-config.json`
-is used inside it). See [`config.example.json`](config.example.json):
+is used inside it). A pre-rename `config.json` sitting beside it is migrated
+forward automatically, so existing broker settings are preserved. See
+[`config.example.json`](config.example.json):
 
 ```json
 {
