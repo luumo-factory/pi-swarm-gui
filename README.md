@@ -107,7 +107,8 @@ reachable.
 ## Usage
 
 - **Agent list (left):** double-click an agent to open its monitor; right-click
-  for monitor / controls / stop / **rename** / toggle model / set model / reset.
+  for monitor / controls / stop / **rename** / toggle model / set model / reset /
+  **shut down (/quit)**.
   Only agents we've received a real status update for are shown (stale/retained
   topics are ignored, and a deregistered agent is dropped); offline agents are
   listed last. The **＋ Launch agent ▾** button at the bottom spawns a new agent

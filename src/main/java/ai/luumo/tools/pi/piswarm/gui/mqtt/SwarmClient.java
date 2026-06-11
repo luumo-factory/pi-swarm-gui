@@ -185,6 +185,13 @@ public final class SwarmClient implements MqttCallbackExtended {
         publish(topics.agentControlIn(agentId), node, false);
     }
 
+    /** Ask the agent to shut down gracefully (equivalent to the in-TUI {@code /quit}). */
+    public void quitAgent(String agentId) {
+        ObjectNode node = mapper.createObjectNode();
+        node.put("action", "quit");
+        publish(topics.agentControlIn(agentId), node, false);
+    }
+
     /**
      * Rename an agent over the control plane. {@code reslug=false} changes only
      * the display name and keeps the agent's id/topics stable (so open monitors

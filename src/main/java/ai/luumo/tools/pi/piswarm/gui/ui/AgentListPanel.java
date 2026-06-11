@@ -180,7 +180,21 @@ public final class AgentListPanel extends JPanel implements SwarmModel.SwarmMode
         reset.addActionListener(ev -> actions.reset(agent));
         menu.add(reset);
 
+        JMenuItem quit = new JMenuItem("Shut down agent (/quit)");
+        quit.addActionListener(ev -> confirmQuit(agent));
+        menu.add(quit);
+
         menu.show(e.getComponent(), e.getX(), e.getY());
+    }
+
+    private void confirmQuit(Agent agent) {
+        int choice = javax.swing.JOptionPane.showConfirmDialog(this,
+                "Shut down agent \"" + agent.getName() + "\"?\nThis is equivalent to /quit and stops the agent process.",
+                "Shut down agent", javax.swing.JOptionPane.OK_CANCEL_OPTION,
+                javax.swing.JOptionPane.WARNING_MESSAGE);
+        if (choice == javax.swing.JOptionPane.OK_OPTION) {
+            actions.quit(agent);
+        }
     }
 
     private void promptRename(Agent agent) {

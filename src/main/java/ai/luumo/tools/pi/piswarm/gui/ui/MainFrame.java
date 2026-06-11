@@ -624,6 +624,11 @@ public final class MainFrame extends JFrame implements AgentActions, SwarmModel.
     }
 
     @Override
+    public void quit(Agent agent) {
+        client.quitAgent(agent.getId());
+    }
+
+    @Override
     public void sendMessage(Agent agent, String text) {
         client.sendToAgent(agent.getId(), text);
     }

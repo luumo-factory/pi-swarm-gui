@@ -27,6 +27,9 @@ public interface AgentActions {
     /** Reset the agent's conversation context. */
     void reset(Agent agent);
 
+    /** Shut the agent down gracefully (equivalent to {@code /quit}). */
+    void quit(Agent agent);
+
     /** Open (or focus) the per-agent monitor window. */
     void openMonitor(Agent agent);
 
